@@ -1,18 +1,12 @@
-// src/routes/health.ts
 import { Router } from "express";
-import { Pool } from "pg";
+import { query } from "../db";
 
 const router = Router();
-
-// Pool global reutilizable
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
 
 router.get("/health/db", async (_req, res) => {
   const inicio = Date.now();
   try {
-    await pool.query("SELECT 1");
+    await query("SELECT 1");
     const duracionMs = Date.now() - inicio;
 
     return res.json({
