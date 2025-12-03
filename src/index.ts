@@ -2,11 +2,13 @@
 import express from "express";
 import { env } from "./env";
 import { pool, query } from "./db";
+import healthRouter from "./routes/health";
 
 const app = express();
 
 // Para leer JSON
 app.use(express.json());
+app.use(healthRouter);
 
 // Log muy simple de cada request
 app.use((req, _res, next) => {
