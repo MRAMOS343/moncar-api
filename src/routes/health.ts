@@ -69,11 +69,11 @@ router.get("/health/db", async (_req, res) => {
 
 /**
  * Endpoint de debug: info de conexión y conteos básicos.
- * OJO: usa query(...) correctamente como QueryResult, no como array.
+ * Aquí usamos query(...) correctamente como T[], no como QueryResult.
  */
 router.get("/debug/db-info", async (_req, res) => {
   try {
-    const infoResult = await query<{
+    const infoRows = await query<{
       host: string | null;
       port: number | null;
       db: string;
@@ -90,21 +90,21 @@ router.get("/debug/db-info", async (_req, res) => {
       `
     );
 
-    const row = infoResult.rows[0];
+    const row = infoRows[0];
 
-    const ventasResult = await query<{ count: string }>(
+    const ventasRows = await query<{ count: string }>(
       "SELECT COUNT(*)::text AS count FROM ventas"
     );
-    const lineasResult = await query<{ count: string }>(
+    const lineasRows = await query<{ count: string }>(
       "SELECT COUNT(*)::text AS count FROM lineas_venta"
     );
-    const pagosResult = await query<{ count: string }>(
+    const pagosRows = await query<{ count: string }>(
       "SELECT COUNT(*)::text AS count FROM pagos_venta"
     );
 
-    const ventasCount = Number(ventasResult.rows[0]?.count ?? "0");
-    const lineasCount = Number(lineasResult.rows[0]?.count ?? "0");
-    const pagosCount = Number(pagosResult.rows[0]?.count ?? "0");
+    const ventasCount = Number(ventasRows[0]?.count ?? "0");
+    const lineasCount = Number(lineasRows[0]?.count ?? "0");
+    const pagosCount = Number(pagosRows[0]?.count ?? "0");
 
     return res.json({
       ok: true,
