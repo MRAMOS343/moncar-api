@@ -2,6 +2,8 @@
 import { Pool, type PoolClient } from "pg";
 import { env } from "./env";
 
+
+
 // Pool de conexión principal
 export const pool = new Pool({
   host: env.db.host,
@@ -9,8 +11,13 @@ export const pool = new Pool({
   user: env.db.user,
   password: env.db.password,
   database: env.db.database,
-  ssl: env.db.ssl,
+  // Forzar SSL sin rechazar el certificado “self-signed”
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
+
+
 
 /**
  * Helper para consultas simples.
