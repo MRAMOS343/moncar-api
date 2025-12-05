@@ -1,7 +1,7 @@
 // src/routes/ventas.ts
 import { Router } from "express";
 import { randomUUID } from "crypto";
-import { pool } from "../db";
+import { pool, withTransaction } from "../db";
 import { BatchVentasSchema } from "../schemas/ventas";
 
 const router = Router();
@@ -56,114 +56,117 @@ router.post("/ventas/import-batch", async (req, res) => {
     maxIdVenta = Math.max(maxIdVenta, venta.id_venta);
 
     try {
-      // --- Encabezado de venta ---
-      await pool.query(
-        `
-        INSERT INTO ventas (
-          id_venta,
-          fecha_hora_local,
-          sucursal_pos,
-          caja,
-          folio_serie,
-          folio_numero,
-          subtotal,
-          impuesto,
-          total
-        ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9
-        )
-        ON CONFLICT (id_venta) DO UPDATE SET
-          fecha_hora_local = EXCLUDED.fecha_hora_local,
-          sucursal_pos     = EXCLUDED.sucursal_pos,
-          caja             = EXCLUDED.caja,
-          folio_serie      = EXCLUDED.folio_serie,
-          folio_numero     = EXCLUDED.folio_numero,
-          subtotal         = EXCLUDED.subtotal,
-          impuesto         = EXCLUDED.impuesto,
-          total            = EXCLUDED.total,
-          updated_at       = now()
-      `,
-        [
+      // TODO de UNA venta va dentro de una sola transacción
+      await withTransaction(async (client) => {
+        // --- Encabezado de venta ---
+        await client.query(
+          `
+          INSERT INTO ventas (
+            id_venta,
+            fecha_hora_local,
+            sucursal_pos,
+            caja,
+            folio_serie,
+            folio_numero,
+            subtotal,
+            impuesto,
+            total
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9
+          )
+          ON CONFLICT (id_venta) DO UPDATE SET
+            fecha_hora_local = EXCLUDED.fecha_hora_local,
+            sucursal_pos     = EXCLUDED.sucursal_pos,
+            caja             = EXCLUDED.caja,
+            folio_serie      = EXCLUDED.folio_serie,
+            folio_numero     = EXCLUDED.folio_numero,
+            subtotal         = EXCLUDED.subtotal,
+            impuesto         = EXCLUDED.impuesto,
+            total            = EXCLUDED.total,
+            updated_at       = now()
+        `,
+          [
+            venta.id_venta,
+            venta.fecha_emision,                 // mapeo: fecha_emision -> fecha_hora_local
+            (venta as any).sucursal ?? null,     // mapeo: sucursal -> sucursal_pos
+            (venta as any).caja ?? null,
+            null,                                // folio_serie (si luego la tienes, se mapea)
+            null,                                // folio_numero
+            venta.subtotal,
+            venta.impuestos,                     // plural en schema -> impuesto en tabla
+            venta.total,
+          ]
+        );
+
+        // Log mínimo para depurar
+        console.log("[ventas.import-batch] upsert venta", { id_venta: venta.id_venta });
+
+        // --- Líneas de venta ---
+        await client.query("DELETE FROM lineas_venta WHERE id_venta = $1", [
           venta.id_venta,
-          venta.fecha_emision,                 // mapeo: fecha_emision -> fecha_hora_local
-          (venta as any).sucursal ?? null,     // mapeo: sucursal -> sucursal_pos
-          (venta as any).caja ?? null,
-          null,                                // folio_serie (si luego la tienes, se mapea)
-          null,                                // folio_numero
-          venta.subtotal,
-          venta.impuestos,                     // plural en schema -> impuesto en tabla
-          venta.total,
-        ]
-      );
+        ]);
 
-      // Log mínimo para depurar
-      console.log("[ventas.import-batch] upsert venta", { id_venta: venta.id_venta });
+        for (const [idx, linea] of venta.lineas.entries()) {
+          const numeroLinea = idx + 1;
+          const cantidad = linea.cantidad;
+          const precioUnitario = linea.precio;
+          const descuento = linea.descuento ?? 0;
+          const totalLinea = cantidad * precioUnitario - descuento;
 
-      // --- Líneas de venta ---
-      await pool.query("DELETE FROM lineas_venta WHERE id_venta = $1", [
-        venta.id_venta,
-      ]);
+          await client.query(
+            `
+            INSERT INTO lineas_venta(
+              id_venta,
+              numero_linea,
+              sku,
+              cantidad,
+              precio_unitario,
+              descuento,
+              total_linea,
+              almacen_pos
+            ) VALUES (
+              $1,$2,$3,$4,$5,$6,$7,$8
+            )
+          `,
+            [
+              venta.id_venta,
+              numeroLinea,
+              linea.articulo,                     // mapeo: articulo -> sku
+              cantidad,
+              precioUnitario,
+              descuento,
+              totalLinea,
+              (linea as any).almacen ?? null,
+            ]
+          );
+        }
 
-      for (const [idx, linea] of venta.lineas.entries()) {
-        const numeroLinea = idx + 1;
-        const cantidad = linea.cantidad;
-        const precioUnitario = linea.precio;
-        const descuento = linea.descuento ?? 0;
-        const totalLinea = cantidad * precioUnitario - descuento;
+        // --- Pagos ---
+        await client.query("DELETE FROM pagos_venta WHERE id_venta = $1", [
+          venta.id_venta,
+        ]);
 
-        await pool.query(
-          `
-          INSERT INTO lineas_venta(
-            id_venta,
-            numero_linea,
-            sku,
-            cantidad,
-            precio_unitario,
-            descuento,
-            total_linea,
-            almacen_pos
-          ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8
-          )
-        `,
-          [
-            venta.id_venta,
-            numeroLinea,
-            linea.articulo,                     // mapeo: articulo -> sku
-            cantidad,
-            precioUnitario,
-            descuento,
-            totalLinea,
-            (linea as any).almacen ?? null,
-          ]
-        );
-      }
-
-      // --- Pagos ---
-      await pool.query("DELETE FROM pagos_venta WHERE id_venta = $1", [
-        venta.id_venta,
-      ]);
-
-      for (const pago of venta.pagos) {
-        await pool.query(
-          `
-          INSERT INTO pagos_venta(
-            id_venta,
-            indice,
-            metodo,
-            monto
-          ) VALUES (
-            $1,$2,$3,$4
-          )
-        `,
-          [
-            venta.id_venta,
-            pago.idx,          // tu schema real
-            pago.metodo,
-            pago.monto,
-          ]
-        );
-      }
+        for (const pago of venta.pagos) {
+          await client.query(
+            `
+            INSERT INTO pagos_venta(
+              id_venta,
+              indice,
+              metodo,
+              monto
+            ) VALUES (
+              $1,$2,$3,$4
+            )
+          `,
+            [
+              venta.id_venta,
+              pago.idx,          // tu schema real
+              pago.metodo,
+              pago.monto,
+            ]
+          );
+        }
+      });
 
       okCount++;
     } catch (e) {
@@ -242,4 +245,3 @@ router.post("/ventas/import-batch", async (req, res) => {
 });
 
 export default router;
-

@@ -1,38 +1,55 @@
 // src/db.ts
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { env } from "./env";
 
+// Pool de conexión principal
 export const pool = new Pool({
   host: env.db.host,
   port: env.db.port,
   user: env.db.user,
   password: env.db.password,
   database: env.db.database,
-  ssl: env.db.ssl ? { rejectUnauthorized: false } : undefined,
-  max: 10
+  ssl: env.db.ssl,
 });
 
-// Helper para hacer queries con logs sencillos
-export async function query<T = any>(text: string, params?: any[]): Promise<T[]> {
-  const start = Date.now();
+/**
+ * Helper para consultas simples.
+ *
+ * health.ts lo usa así:
+ *   const info = await query<{ host: string | null; db: string; user: string }>(...);
+ *   const [row] = info;
+ */
+export async function query<T = any>(
+  text: string,
+  params?: any[]
+): Promise<T[]> {
+  const result = await pool.query(text, params);
+  return result.rows as T[];
+}
+
+/**
+ * Helper para ejecutar una función dentro de una transacción.
+ *
+ * Uso típico:
+ *   await withTransaction(async (client) => {
+ *     await client.query(...);
+ *     await client.query(...);
+ *   });
+ */
+export async function withTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await pool.connect();
+
   try {
-    const result = await pool.query(text, params);
-    const duration = Date.now() - start;
-    console.log(JSON.stringify({
-      level: "info",
-      msg: "db.query",
-      text,
-      duration_ms: duration,
-      rows: result.rowCount
-    }));
-    return result.rows as T[];
-  } catch (err: any) {
-    console.error(JSON.stringify({
-      level: "error",
-      msg: "db.query.error",
-      text,
-      error: err.message
-    }));
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
     throw err;
+  } finally {
+    client.release();
   }
 }

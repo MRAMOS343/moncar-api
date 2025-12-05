@@ -19,4 +19,3 @@ const port = env.port || 4000;
 app.listen(port, () => {
   console.log(`API escuchando en puerto ${port}`);
 });
-
