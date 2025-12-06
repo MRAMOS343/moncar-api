@@ -1,10 +1,11 @@
 // src/routes/ventas.ts
 import { Router } from "express";
 import { randomUUID } from "crypto";
-import { pool, withTransaction } from "../db";
+import { pool, withTransaction, query } from "../db"; // ← aquí añadimos query
 import { BatchVentasSchema } from "../schemas/ventas";
 
 const router = Router();
+
 
 /**
  * Importa un lote de ventas desde el POS.
@@ -243,5 +244,184 @@ router.post("/ventas/import-batch", async (req, res) => {
     errors: errorDetails,
   });
 });
+// Listado paginado de ventas
+// Listado paginado de ventas
+router.get("/ventas", async (req, res) => {
+  try {
+    const { from, cursor, limit } = req.query;
 
+    // Fecha mínima (desde cuándo listar)
+    const sinceDate = (from as string) ?? "2025-01-01";
+
+    // Cursor por id_venta (para paginación)
+    const cursorId = cursor ? Number(cursor) : 0;
+
+    // Límite de filas por página
+    const pageSize = limit ? Math.min(Number(limit), 100) : 50;
+
+    const rows = await query<{
+      id_venta: number;
+      fecha_emision: string;
+      sucursal: string | null;
+      caja: string | null;
+      subtotal: string;
+      impuestos: string;
+      total: string;
+    }>(
+      `
+      SELECT
+        id_venta,
+        fecha_hora_local AS fecha_emision,
+        sucursal_pos     AS sucursal,
+        caja,
+        subtotal::text   AS subtotal,
+        impuesto::text   AS impuestos,
+        total::text      AS total
+      FROM ventas
+      WHERE fecha_hora_local >= $1
+        AND id_venta > $2
+      ORDER BY id_venta
+      LIMIT $3
+      `,
+      [sinceDate, cursorId, pageSize]
+    );
+
+    // Calcular next_cursor
+    const nextCursor =
+      rows.length === pageSize ? rows[rows.length - 1].id_venta : null;
+
+    return res.json({
+      ok: true,
+      items: rows,
+      next_cursor: nextCursor,
+    });
+  } catch (error) {
+    console.error("[GET /ventas] error:", error);
+    return res.status(500).json({
+      ok: false,
+      error: "VENTAS_LIST_FAILED",
+    });
+  }
+});
+
+
+
+
+
+
+
+// Detalle de una venta por id_venta
+
+
+
+
+
+// Detalle de una venta por id_venta
+router.get("/ventas/:id_venta", async (req, res) => {
+  const idVenta = Number(req.params.id_venta);
+
+  if (!Number.isFinite(idVenta)) {
+    return res.status(400).json({
+      ok: false,
+      error: "ID_VENTA_INVALIDO",
+    });
+  }
+
+  try {
+    // Encabezado
+    const ventasRows = await query<{
+      id_venta: number;
+      fecha_emision: string;
+      sucursal: string | null;
+      caja: string | null;
+      subtotal: string;
+      impuestos: string;
+      total: string;
+    }>(
+      `
+      SELECT
+        id_venta,
+        fecha_hora_local AS fecha_emision,
+        sucursal_pos     AS sucursal,
+        caja,
+        subtotal::text   AS subtotal,
+        impuesto::text   AS impuestos,
+        total::text      AS total
+      FROM ventas
+      WHERE id_venta = $1
+      `,
+      [idVenta]
+    );
+
+    if (ventasRows.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        error: "VENTA_NO_ENCONTRADA",
+      });
+    }
+
+    const venta = ventasRows[0];
+
+    // Líneas
+    const lineas = await query<{
+      id_venta: number;
+      line_no: number;
+      sku: string;
+      cantidad: string;
+      precio_unitario: string;
+      descuento: string;
+      total_linea: string;
+      almacen: string | null;
+    }>(
+      `
+      SELECT
+        id_venta,
+        numero_linea           AS line_no,
+        sku,
+        cantidad::text         AS cantidad,
+        precio_unitario::text  AS precio_unitario,
+        descuento::text        AS descuento,
+        total_linea::text      AS total_linea,
+        almacen_pos            AS almacen
+      FROM lineas_venta
+      WHERE id_venta = $1
+      ORDER BY numero_linea
+      `,
+      [idVenta]
+    );
+
+    // Pagos
+    const pagos = await query<{
+      id_venta: number;
+      idx: number;
+      metodo: string;
+      monto: string;
+    }>(
+      `
+      SELECT
+        id_venta,
+        indice        AS idx,
+        metodo,
+        monto::text   AS monto
+      FROM pagos_venta
+      WHERE id_venta = $1
+      ORDER BY indice
+      `,
+      [idVenta]
+    );
+
+    return res.json({
+      ok: true,
+      venta,
+      lineas,
+      pagos,
+    });
+  } catch (error) {
+    console.error("[GET /ventas/:id_venta] error:", error);
+    return res.status(500).json({
+      ok: false,
+      error: "VENTA_DETALLE_FAILED",
+    });
+  }
+});
 export default router;
