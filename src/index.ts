@@ -1,25 +1,51 @@
 // src/index.ts
+import "dotenv/config";
 import express from "express";
-import { env } from "./env";
-import healthRouter from "./routes/health";
-import ventasRouter from "./routes/ventas";
-import inventarioRouter from "./routes/inventario"; // 
+import cors from "cors";
 
+import ventasRouter from "./routes/ventas";
+import healthRouter from "./routes/health";
+import inventarioRouter from "./routes/inventario";
+import fichasRouter from "./routes/fichas-tecnicas";
+
+import { logger } from './logger';
+import debugRouter from './routes/debug';
 
 const app = express();
 
-// Middleware para JSON
+// Middlewares básicos
+app.use(cors());
 app.use(express.json());
 
-// Rutas
-app.use(healthRouter);
+// Rutas principales
 app.use(ventasRouter);
-app.use(inventarioRouter); // 
+app.use(healthRouter);
+app.use(inventarioRouter);
+app.use(debugRouter);
+app.use(fichasRouter);
 
+
+
+// Endpoint de diagnóstico rápido
+app.get("/ping", (_req, res) => {
+  res.json({
+    ok: true,
+    message: "pong",
+    now: new Date().toISOString(),
+  });
+});
 
 // Puerto
-const port = env.port || 4000;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 
-app.listen(port, () => {
-  console.log(`API escuchando en puerto ${port}`);
+// Levantar servidor HTTP
+app.listen(PORT, () => {
+  console.log(`API escuchando en puerto ${PORT}`);
 });
+
+app.listen(PORT, () => {
+  logger.info({ msg: 'server.started',PORT});
+});
+
+export default app;
+

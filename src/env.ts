@@ -1,3 +1,4 @@
+// src/env.ts
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -18,6 +19,12 @@ export const env = {
     user: required("DB_USER"),
     password: required("DB_PASSWORD"),
     database: required("DB_NAME"),
-    ssl: process.env.DB_SSL === "true"
-  }
+    ssl: process.env.DB_SSL === "true",
+  },
+  jwt: {
+   
+    secret: process.env.JWT_SECRET || "monzopachuca",
+    expiresIn: process.env.JWT_EXPIRES_IN || "7d",
+  },
 };
+
