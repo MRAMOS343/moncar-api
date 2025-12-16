@@ -1,6 +1,10 @@
 // src/db.ts
 import { Pool, type PoolClient } from "pg";
 import { env } from "./env";
+import pg from "pg";
+
+
+pg.types.setTypeParser(20, (val) => (val === null ? null : Number.parseInt(val, 10)));
 
 
 
