@@ -1,6 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
+import * as jwt from "jsonwebtoken";
+import type { Secret, SignOptions } from "jsonwebtoken";
 import { requireAuth } from "../middleware/requireAuth";
 import { query } from "../db";
 
@@ -8,7 +9,28 @@ const router = Router();
 
 const MAX_ATTEMPTS = Number(process.env.AUTH_MAX_FAILED_ATTEMPTS ?? 8);
 const LOCK_MINUTES = Number(process.env.AUTH_LOCK_MINUTES ?? 15);
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? "7d";
+
+/**
+ * jsonwebtoken v9 + @types v9: expiresIn es (number | StringValue).
+ * process.env te da string “amplio”, así que:
+ *  - aceptamos números puros (segundos)
+ *  - aceptamos formatos ms-style: 15m, 7d, 12h, 30s, 500ms, etc.
+ *  - si no cumple, fallback a "7d"
+ */
+function coerceExpiresIn(raw: string): SignOptions["expiresIn"] {
+  const v = String(raw ?? "").trim();
+
+  // Si es número puro -> segundos
+  if (/^\d+$/.test(v)) return Number(v);
+
+  // Formatos tipo ms: 15m, 7d, 12h, 30s, 500ms, etc.
+  if (/^\d+(ms|s|m|h|d|w|y)$/.test(v)) {
+    return v as unknown as SignOptions["expiresIn"];
+  }
+
+  // Fallback seguro
+  return "7d" as unknown as SignOptions["expiresIn"];
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -16,7 +38,7 @@ function nowIso() {
 
 /**
  * POST /auth/login
- * Body: { email, password }  (también acepto { correo, password } por compatibilidad)
+ * Body: { email, password }  (también acepta { correo, password })
  * 200: { token, user, must_change_password }
  * 401: credenciales inválidas
  * 423: cuenta bloqueada temporalmente
@@ -54,9 +76,10 @@ router.post("/auth/login", async (req, res) => {
       [correo]
     );
 
-    const u = rows[0];
+    const u = rows?.[0];
+
+    // No revelar si existe o no
     if (!u || !u.activo) {
-      // No revelar si existe o no
       return res.status(401).json({ ok: false, error: "INVALID_CREDENTIALS" });
     }
 
@@ -69,9 +92,8 @@ router.post("/auth/login", async (req, res) => {
       });
     }
 
-    const passwordOk = await bcrypt.compare(password, u.password_hash);
+    const passwordOk = await bcrypt.compare(password, String(u.password_hash));
     if (!passwordOk) {
-      // Incremento de intentos + lockout si alcanza MAX_ATTEMPTS
       const nextAttempts = Number(u.failed_login_attempts ?? 0) + 1;
       const shouldLock = nextAttempts >= MAX_ATTEMPTS;
 
@@ -81,7 +103,7 @@ router.post("/auth/login", async (req, res) => {
         SET
           failed_login_attempts = $2,
           locked_until = CASE
-            WHEN $3 THEN (now() + ($4 || ' minutes')::interval)
+            WHEN $3 THEN (now() + ($4 * interval '1 minute'))
             ELSE NULL
           END,
           actualizado_en = now()
@@ -112,29 +134,33 @@ router.post("/auth/login", async (req, res) => {
       [u.id_usuario, ip, userAgent]
     );
 
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      return res.status(500).json({ ok: false, error: "SERVER_MISCONFIG_JWT_SECRET" });
+    const secretStr = process.env.JWT_SECRET;
+    if (!secretStr) {
+      return res
+        .status(500)
+        .json({ ok: false, error: "SERVER_MISCONFIG_JWT_SECRET" });
     }
+    const secret: Secret = secretStr;
 
-    const token = jwt.sign(
-      {
-        sub: String(u.id_usuario),
-        rol: String(u.rol ?? "cajero"),
-        sucursal_id: u.sucursal_id ? String(u.sucursal_id) : undefined,
-        correo: String(u.correo),
-      },
-      secret,
-      { expiresIn: JWT_EXPIRES_IN }
-    );
+    const payload = {
+      sub: String(u.id_usuario),
+      rol: String(u.rol ?? "cajero"),
+      sucursal_id: u.sucursal_id ? String(u.sucursal_id) : undefined,
+      correo: String(u.correo),
+    };
 
-    // Respuesta compatible con tu frontend actual
+    const signOptions: SignOptions = {
+      expiresIn: coerceExpiresIn(process.env.JWT_EXPIRES_IN ?? "7d"),
+    };
+
+    // ✅ Con esto TS ya elige el overload correcto
+    const token = jwt.sign(payload, secret, signOptions);
+
     const user = {
       id: String(u.id_usuario),
       nombre: String(u.nombre),
       email: String(u.correo),
       role: String(u.rol ?? "cajero"),
-      // Extras útiles para UI futura:
       telefono: u.telefono ?? null,
       avatar_url: u.avatar_url ?? null,
       sucursal_id: u.sucursal_id ?? null,
@@ -181,7 +207,7 @@ router.get("/auth/me", requireAuth, async (req, res) => {
       [auth.sub]
     );
 
-    const u = rows[0];
+    const u = rows?.[0];
     if (!u || !u.activo) {
       return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
     }
@@ -212,4 +238,3 @@ router.get("/auth/me", requireAuth, async (req, res) => {
 });
 
 export default router;
-
