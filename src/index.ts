@@ -7,6 +7,9 @@ import ventasRouter from "./routes/ventas";
 import healthRouter from "./routes/health";
 import inventarioRouter from "./routes/inventario";
 import fichasRouter from "./routes/fichas-tecnicas";
+import authRouter from "./routes/auth";
+
+
 
 import { logger } from './logger';
 import debugRouter from './routes/debug';
@@ -23,6 +26,7 @@ app.use(healthRouter);
 app.use(inventarioRouter);
 app.use(debugRouter);
 app.use(fichasRouter);
+app.use(authRouter);
 
 
 
