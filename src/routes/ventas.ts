@@ -7,6 +7,16 @@ import { requireAuth } from "../middleware/requireAuth";
 
 const router = Router();
 
+/**
+ * MODO SINGLE-STORE (temporal):
+ * Forzamos que TODA la info quede ligada a esta sucursal.
+ *
+ * Cuando actives multitienda, cambia a:
+ *   const FORCED_SUCURSAL_ID = process.env.FORCED_SUCURSAL_ID ?? null;
+ * y usa el valor real del payload/claims.
+ */
+const FORCED_SUCURSAL_ID = "moncar";
+
 function parseBool(v: unknown): boolean {
   const s = String(v ?? "").trim().toLowerCase();
   return s === "1" || s === "true" || s === "yes" || s === "on";
@@ -20,17 +30,8 @@ function parseBool(v: unknown): boolean {
  *  - POST /sales/import-batch
  *
  * Body: BatchVentasSchema (array de ventas)
- * Respuesta:
- * {
- *   ok:    número de ventas procesadas (insert o update),
- *   dup:   (por ahora 0),
- *   error: número de ventas que fallaron dentro del lote,
- *   batch_id: uuid del registro en import_log,
- *   errors: [{ id_venta, reason }]
- * }
  */
 router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) => {
-  // 1) Validación con Zod
   const parseResult = BatchVentasSchema.safeParse(req.body);
   if (!parseResult.success) {
     return res.status(400).json({
@@ -65,15 +66,14 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
   for (const venta of ventas) {
     maxIdVenta = Math.max(maxIdVenta, venta.id_venta);
 
-    // Reglas de totales acordadas:
-    // total = subtotal + impuesto (desde tabla ventas del POS)
+    // total = subtotal + impuesto (acordado)
     const subtotal = Number(venta.subtotal ?? 0);
     const impuesto = Number((venta as any).impuestos ?? (venta as any).impuesto ?? 0);
     const total = subtotal + impuesto;
 
     try {
       await withTransaction(async (client) => {
-        // --- Encabezado de venta (UPSERT) ---
+        // --- Encabezado (UPSERT) ---
         await client.query(
           `
           INSERT INTO ventas (
@@ -102,10 +102,10 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
           `,
           [
             venta.id_venta,
-            venta.fecha_emision,               // schema -> fecha_emision
-            (venta as any).sucursal ?? null,   // schema actual: sucursal
+            venta.fecha_emision,
+            FORCED_SUCURSAL_ID,              // ✅ FORZADO (moncar)
             (venta as any).caja ?? null,
-            (venta as any).serie_documento ?? null, // si lo agregas luego en extractor
+            (venta as any).serie_documento ?? null,
             (venta as any).folio_numero ?? null,
             subtotal,
             impuesto,
@@ -114,9 +114,7 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
         );
 
         // --- Líneas (reemplazo total idempotente) ---
-        await client.query("DELETE FROM lineas_venta WHERE venta_id = $1", [
-          venta.id_venta,
-        ]);
+        await client.query("DELETE FROM lineas_venta WHERE venta_id = $1", [venta.id_venta]);
 
         for (const [idx, linea] of venta.lineas.entries()) {
           const renglon = idx + 1;
@@ -124,12 +122,8 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
           const cantidad = Number(linea.cantidad ?? 0);
           const precioUnitario = Number((linea as any).precio ?? (linea as any).precio_unitario ?? 0);
           const descuento = Number(linea.descuento ?? 0);
-
-          // si tu extractor trae impuesto por línea, úsalo; si no, 0
           const impuestoLinea = Number((linea as any).impuesto ?? (linea as any).impuesto_linea ?? 0);
 
-          // importe_linea (MVP): cantidad*precio - descuento (sin impuesto)
-          // (si tu POS ya trae "importe" por línea, úsalo en vez de recalcular)
           const importeLinea =
             (linea as any).importe != null
               ? Number((linea as any).importe)
@@ -156,13 +150,14 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
             [
               venta.id_venta,
               renglon,
-              linea.articulo,                   // schema: articulo
+              linea.articulo,
               cantidad,
               precioUnitario,
               descuento,
               impuestoLinea,
               importeLinea,
-              (linea as any).almacen ?? null,   // schema actual: almacen
+              // Si tu UI quiere almacen_id consistente, puedes forzarlo igual:
+              (linea as any).almacen ?? FORCED_SUCURSAL_ID,
               (linea as any).id_salida_origen ?? null,
               (linea as any).estado_linea ?? null,
             ]
@@ -170,9 +165,7 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
         }
 
         // --- Pagos (reemplazo total idempotente) ---
-        await client.query("DELETE FROM pagos_venta WHERE venta_id = $1", [
-          venta.id_venta,
-        ]);
+        await client.query("DELETE FROM pagos_venta WHERE venta_id = $1", [venta.id_venta]);
 
         for (const pago of venta.pagos) {
           await client.query(
@@ -186,12 +179,7 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
               $1,$2,$3,$4
             )
             `,
-            [
-              venta.id_venta,
-              (pago as any).idx,     // schema: idx
-              (pago as any).metodo,
-              (pago as any).monto,
-            ]
+            [venta.id_venta, (pago as any).idx, (pago as any).metodo, (pago as any).monto]
           );
         }
       });
@@ -200,14 +188,8 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
     } catch (e) {
       errorCount++;
       const reason = e instanceof Error ? e.message : "Error desconocido";
-      errorDetails.push({
-        id_venta: venta.id_venta,
-        reason,
-      });
-      console.error("[ventas.import-batch] error procesando venta", {
-        id_venta: venta.id_venta,
-        reason,
-      });
+      errorDetails.push({ id_venta: venta.id_venta, reason });
+      console.error("[ventas.import-batch] error procesando venta", { id_venta: venta.id_venta, reason });
     }
   }
 
@@ -227,15 +209,7 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
         $1,$2,$3,$4,$5,$6,$7
       )
       `,
-      [
-        batchId,
-        sourceId,
-        ventas.length,
-        okCount,
-        dupCount,
-        errorCount,
-        JSON.stringify(errorDetails),
-      ]
+      [batchId, sourceId, ventas.length, okCount, dupCount, errorCount, JSON.stringify(errorDetails)]
     );
   } catch (e) {
     console.error("[ventas.import-batch] error escribiendo import_log", e);
@@ -280,8 +254,9 @@ router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) =>
  *  - from=2025-01-01 (default)
  *  - cursor=venta_id (default 0)
  *  - limit (default 50, max 100)
- *  - sucursal_id (opcional)
  *  - include_cancelled=1|true (opcional)
+ *
+ * NOTA: sucursal_id se fuerza a moncar (single-store)
  */
 router.get(["/ventas", "/sales"], requireAuth, async (req, res) => {
   try {
@@ -290,8 +265,10 @@ router.get(["/ventas", "/sales"], requireAuth, async (req, res) => {
     const pageSizeRaw = req.query.limit ? Number(req.query.limit) : 50;
     const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(Math.max(pageSizeRaw, 1), 100) : 50;
 
-    const sucursalId = req.query.sucursal_id ? String(req.query.sucursal_id) : null;
     const includeCancelled = parseBool(req.query.include_cancelled);
+
+    // ✅ Forzado: ignoramos req.query.sucursal_id
+    const sucursalId = FORCED_SUCURSAL_ID;
 
     const rows = await query<{
       venta_id: number;
@@ -316,7 +293,7 @@ router.get(["/ventas", "/sales"], requireAuth, async (req, res) => {
       FROM ventas
       WHERE fecha_emision >= $1::timestamptz
         AND venta_id > $2::bigint
-        AND ($3::text IS NULL OR sucursal_id = $3::text)
+        AND sucursal_id = $3::text          -- ✅ SIN condición opcional
         AND ($4::boolean = true OR cancelada = false)
       ORDER BY venta_id ASC
       LIMIT $5
@@ -333,29 +310,25 @@ router.get(["/ventas", "/sales"], requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error("[GET /ventas] error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "VENTAS_LIST_FAILED",
-    });
+    return res.status(500).json({ ok: false, error: "VENTAS_LIST_FAILED" });
   }
 });
 
 /**
  * GET /ventas/:venta_id  (alias: /sales/:venta_id)
  * Detalle: encabezado + líneas + pagos
+ *
+ * NOTA: valida que la venta pertenezca a moncar (single-store)
  */
 router.get(["/ventas/:venta_id", "/sales/:venta_id"], requireAuth, async (req, res) => {
   const ventaId = Number(req.params.venta_id);
 
   if (!Number.isFinite(ventaId)) {
-    return res.status(400).json({
-      ok: false,
-      error: "VENTA_ID_INVALIDO",
-    });
+    return res.status(400).json({ ok: false, error: "VENTA_ID_INVALIDO" });
   }
 
   try {
-    // Encabezado
+    // Encabezado (forzamos sucursal_id)
     const ventasRows = await query<{
       venta_id: number;
       fecha_emision: string;
@@ -388,16 +361,14 @@ router.get(["/ventas/:venta_id", "/sales/:venta_id"], requireAuth, async (req, r
         folio_sustitucion
       FROM ventas
       WHERE venta_id = $1::bigint
+        AND sucursal_id = $2::text          -- ✅ valida tienda
       LIMIT 1
       `,
-      [ventaId]
+      [ventaId, FORCED_SUCURSAL_ID]
     );
 
     if (ventasRows.length === 0) {
-      return res.status(404).json({
-        ok: false,
-        error: "VENTA_NO_ENCONTRADA",
-      });
+      return res.status(404).json({ ok: false, error: "VENTA_NO_ENCONTRADA" });
     }
 
     const venta = ventasRows[0];
@@ -452,18 +423,10 @@ router.get(["/ventas/:venta_id", "/sales/:venta_id"], requireAuth, async (req, r
       [ventaId]
     );
 
-    return res.json({
-      ok: true,
-      venta,
-      lineas,
-      pagos,
-    });
+    return res.json({ ok: true, venta, lineas, pagos });
   } catch (error) {
     console.error("[GET /ventas/:venta_id] error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "VENTA_DETALLE_FAILED",
-    });
+    return res.status(500).json({ ok: false, error: "VENTA_DETALLE_FAILED" });
   }
 });
 
