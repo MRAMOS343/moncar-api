@@ -1,14 +1,23 @@
 // src/routes/ventas.ts
 import { Router } from "express";
 import { randomUUID } from "crypto";
-import { pool, withTransaction, query } from "../db"; // ← aquí añadimos query
+import { pool, withTransaction, query } from "../db";
 import { BatchVentasSchema } from "../schemas/ventas";
+import { requireAuth } from "../middleware/requireAuth";
 
 const router = Router();
 
+function parseBool(v: unknown): boolean {
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes" || s === "on";
+}
 
 /**
  * Importa un lote de ventas desde el POS.
+ *
+ * Rutas (equivalentes):
+ *  - POST /ventas/import-batch
+ *  - POST /sales/import-batch
  *
  * Body: BatchVentasSchema (array de ventas)
  * Respuesta:
@@ -20,7 +29,7 @@ const router = Router();
  *   errors: [{ id_venta, reason }]
  * }
  */
-router.post("/ventas/import-batch", async (req, res) => {
+router.post(["/ventas/import-batch", "/sales/import-batch"], async (req, res) => {
   // 1) Validación con Zod
   const parseResult = BatchVentasSchema.safeParse(req.body);
   if (!parseResult.success) {
@@ -56,18 +65,23 @@ router.post("/ventas/import-batch", async (req, res) => {
   for (const venta of ventas) {
     maxIdVenta = Math.max(maxIdVenta, venta.id_venta);
 
+    // Reglas de totales acordadas:
+    // total = subtotal + impuesto (desde tabla ventas del POS)
+    const subtotal = Number(venta.subtotal ?? 0);
+    const impuesto = Number((venta as any).impuestos ?? (venta as any).impuesto ?? 0);
+    const total = subtotal + impuesto;
+
     try {
-      // TODO de UNA venta va dentro de una sola transacción
       await withTransaction(async (client) => {
-        // --- Encabezado de venta ---
+        // --- Encabezado de venta (UPSERT) ---
         await client.query(
           `
           INSERT INTO ventas (
-            id_venta,
-            fecha_hora_local,
-            sucursal_pos,
-            caja,
-            folio_serie,
+            venta_id,
+            fecha_emision,
+            sucursal_id,
+            caja_id,
+            serie_documento,
             folio_numero,
             subtotal,
             impuesto,
@@ -75,75 +89,88 @@ router.post("/ventas/import-batch", async (req, res) => {
           ) VALUES (
             $1,$2,$3,$4,$5,$6,$7,$8,$9
           )
-          ON CONFLICT (id_venta) DO UPDATE SET
-            fecha_hora_local = EXCLUDED.fecha_hora_local,
-            sucursal_pos     = EXCLUDED.sucursal_pos,
-            caja             = EXCLUDED.caja,
-            folio_serie      = EXCLUDED.folio_serie,
-            folio_numero     = EXCLUDED.folio_numero,
-            subtotal         = EXCLUDED.subtotal,
-            impuesto         = EXCLUDED.impuesto,
-            total            = EXCLUDED.total,
-            updated_at       = now()
-        `,
+          ON CONFLICT (venta_id) DO UPDATE SET
+            fecha_emision     = EXCLUDED.fecha_emision,
+            sucursal_id       = EXCLUDED.sucursal_id,
+            caja_id           = EXCLUDED.caja_id,
+            serie_documento   = EXCLUDED.serie_documento,
+            folio_numero      = EXCLUDED.folio_numero,
+            subtotal          = EXCLUDED.subtotal,
+            impuesto          = EXCLUDED.impuesto,
+            total             = EXCLUDED.total,
+            actualizado_en    = now()
+          `,
           [
             venta.id_venta,
-            venta.fecha_emision,                 // mapeo: fecha_emision -> fecha_hora_local
-            (venta as any).sucursal ?? null,     // mapeo: sucursal -> sucursal_pos
+            venta.fecha_emision,               // schema -> fecha_emision
+            (venta as any).sucursal ?? null,   // schema actual: sucursal
             (venta as any).caja ?? null,
-            null,                                // folio_serie (si luego la tienes, se mapea)
-            null,                                // folio_numero
-            venta.subtotal,
-            venta.impuestos,                     // plural en schema -> impuesto en tabla
-            venta.total,
+            (venta as any).serie_documento ?? null, // si lo agregas luego en extractor
+            (venta as any).folio_numero ?? null,
+            subtotal,
+            impuesto,
+            total,
           ]
         );
 
-        // Log mínimo para depurar
-        console.log("[ventas.import-batch] upsert venta", { id_venta: venta.id_venta });
-
-        // --- Líneas de venta ---
-        await client.query("DELETE FROM lineas_venta WHERE id_venta = $1", [
+        // --- Líneas (reemplazo total idempotente) ---
+        await client.query("DELETE FROM lineas_venta WHERE venta_id = $1", [
           venta.id_venta,
         ]);
 
         for (const [idx, linea] of venta.lineas.entries()) {
-          const numeroLinea = idx + 1;
-          const cantidad = linea.cantidad;
-          const precioUnitario = linea.precio;
-          const descuento = linea.descuento ?? 0;
-          const totalLinea = cantidad * precioUnitario - descuento;
+          const renglon = idx + 1;
+
+          const cantidad = Number(linea.cantidad ?? 0);
+          const precioUnitario = Number((linea as any).precio ?? (linea as any).precio_unitario ?? 0);
+          const descuento = Number(linea.descuento ?? 0);
+
+          // si tu extractor trae impuesto por línea, úsalo; si no, 0
+          const impuestoLinea = Number((linea as any).impuesto ?? (linea as any).impuesto_linea ?? 0);
+
+          // importe_linea (MVP): cantidad*precio - descuento (sin impuesto)
+          // (si tu POS ya trae "importe" por línea, úsalo en vez de recalcular)
+          const importeLinea =
+            (linea as any).importe != null
+              ? Number((linea as any).importe)
+              : cantidad * precioUnitario - descuento;
 
           await client.query(
             `
             INSERT INTO lineas_venta(
-              id_venta,
-              numero_linea,
-              sku,
+              venta_id,
+              renglon,
+              articulo,
               cantidad,
               precio_unitario,
               descuento,
-              total_linea,
-              almacen_pos
+              impuesto_linea,
+              importe_linea,
+              almacen_id,
+              id_salida_origen,
+              estado_linea
             ) VALUES (
-              $1,$2,$3,$4,$5,$6,$7,$8
+              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
             )
-          `,
+            `,
             [
               venta.id_venta,
-              numeroLinea,
-              linea.articulo,                     // mapeo: articulo -> sku
+              renglon,
+              linea.articulo,                   // schema: articulo
               cantidad,
               precioUnitario,
               descuento,
-              totalLinea,
-              (linea as any).almacen ?? null,
+              impuestoLinea,
+              importeLinea,
+              (linea as any).almacen ?? null,   // schema actual: almacen
+              (linea as any).id_salida_origen ?? null,
+              (linea as any).estado_linea ?? null,
             ]
           );
         }
 
-        // --- Pagos ---
-        await client.query("DELETE FROM pagos_venta WHERE id_venta = $1", [
+        // --- Pagos (reemplazo total idempotente) ---
+        await client.query("DELETE FROM pagos_venta WHERE venta_id = $1", [
           venta.id_venta,
         ]);
 
@@ -151,19 +178,19 @@ router.post("/ventas/import-batch", async (req, res) => {
           await client.query(
             `
             INSERT INTO pagos_venta(
-              id_venta,
-              indice,
+              venta_id,
+              idx,
               metodo,
               monto
             ) VALUES (
               $1,$2,$3,$4
             )
-          `,
+            `,
             [
               venta.id_venta,
-              pago.idx,          // tu schema real
-              pago.metodo,
-              pago.monto,
+              (pago as any).idx,     // schema: idx
+              (pago as any).metodo,
+              (pago as any).monto,
             ]
           );
         }
@@ -199,7 +226,7 @@ router.post("/ventas/import-batch", async (req, res) => {
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7
       )
-    `,
+      `,
       [
         batchId,
         sourceId,
@@ -228,7 +255,7 @@ router.post("/ventas/import-batch", async (req, res) => {
         ON CONFLICT (id_fuente) DO UPDATE SET
           ultimo_id_venta = GREATEST(estado_sincronizacion.ultimo_id_venta, EXCLUDED.ultimo_id_venta),
           updated_at      = now()
-      `,
+        `,
         [sourceId, maxIdVenta]
       );
     } catch (e) {
@@ -244,51 +271,60 @@ router.post("/ventas/import-batch", async (req, res) => {
     errors: errorDetails,
   });
 });
-// Listado paginado de ventas
-// Listado paginado de ventas
-router.get("/ventas", async (req, res) => {
+
+/**
+ * GET /ventas  (alias: /sales)
+ * Listado paginado por cursor (venta_id), por defecto EXCLUYE canceladas.
+ *
+ * Query:
+ *  - from=2025-01-01 (default)
+ *  - cursor=venta_id (default 0)
+ *  - limit (default 50, max 100)
+ *  - sucursal_id (opcional)
+ *  - include_cancelled=1|true (opcional)
+ */
+router.get(["/ventas", "/sales"], requireAuth, async (req, res) => {
   try {
-    const { from, cursor, limit } = req.query;
+    const sinceDate = String(req.query.from ?? "2025-01-01");
+    const cursorId = req.query.cursor ? Number(req.query.cursor) : 0;
+    const pageSizeRaw = req.query.limit ? Number(req.query.limit) : 50;
+    const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(Math.max(pageSizeRaw, 1), 100) : 50;
 
-    // Fecha mínima (desde cuándo listar)
-    const sinceDate = (from as string) ?? "2025-01-01";
-
-    // Cursor por id_venta (para paginación)
-    const cursorId = cursor ? Number(cursor) : 0;
-
-    // Límite de filas por página
-    const pageSize = limit ? Math.min(Number(limit), 100) : 50;
+    const sucursalId = req.query.sucursal_id ? String(req.query.sucursal_id) : null;
+    const includeCancelled = parseBool(req.query.include_cancelled);
 
     const rows = await query<{
-      id_venta: number;
+      venta_id: number;
       fecha_emision: string;
-      sucursal: string | null;
-      caja: string | null;
+      sucursal_id: string | null;
+      caja_id: string | null;
       subtotal: string;
-      impuestos: string;
+      impuesto: string;
       total: string;
+      cancelada: boolean;
     }>(
       `
       SELECT
-        id_venta,
-        fecha_hora_local AS fecha_emision,
-        sucursal_pos     AS sucursal,
-        caja,
-        subtotal::text   AS subtotal,
-        impuesto::text   AS impuestos,
-        total::text      AS total
+        venta_id,
+        fecha_emision,
+        sucursal_id,
+        caja_id,
+        subtotal::text AS subtotal,
+        impuesto::text AS impuesto,
+        total::text    AS total,
+        cancelada
       FROM ventas
-      WHERE fecha_hora_local >= $1
-        AND id_venta > $2
-      ORDER BY id_venta
-      LIMIT $3
+      WHERE fecha_emision >= $1::timestamptz
+        AND venta_id > $2::bigint
+        AND ($3::text IS NULL OR sucursal_id = $3::text)
+        AND ($4::boolean = true OR cancelada = false)
+      ORDER BY venta_id ASC
+      LIMIT $5
       `,
-      [sinceDate, cursorId, pageSize]
+      [sinceDate, cursorId, sucursalId, includeCancelled, pageSize]
     );
 
-    // Calcular next_cursor
-    const nextCursor =
-      rows.length === pageSize ? rows[rows.length - 1].id_venta : null;
+    const nextCursor = rows.length === pageSize ? rows[rows.length - 1].venta_id : null;
 
     return res.json({
       ok: true,
@@ -304,53 +340,57 @@ router.get("/ventas", async (req, res) => {
   }
 });
 
+/**
+ * GET /ventas/:venta_id  (alias: /sales/:venta_id)
+ * Detalle: encabezado + líneas + pagos
+ */
+router.get(["/ventas/:venta_id", "/sales/:venta_id"], requireAuth, async (req, res) => {
+  const ventaId = Number(req.params.venta_id);
 
-
-
-
-
-
-// Detalle de una venta por id_venta
-
-
-
-
-
-// Detalle de una venta por id_venta
-router.get("/ventas/:id_venta", async (req, res) => {
-  const idVenta = Number(req.params.id_venta);
-
-  if (!Number.isFinite(idVenta)) {
+  if (!Number.isFinite(ventaId)) {
     return res.status(400).json({
       ok: false,
-      error: "ID_VENTA_INVALIDO",
+      error: "VENTA_ID_INVALIDO",
     });
   }
 
   try {
     // Encabezado
     const ventasRows = await query<{
-      id_venta: number;
+      venta_id: number;
       fecha_emision: string;
-      sucursal: string | null;
-      caja: string | null;
+      sucursal_id: string | null;
+      caja_id: string | null;
+      serie_documento: string | null;
+      folio_numero: string | null;
       subtotal: string;
-      impuestos: string;
+      impuesto: string;
       total: string;
+      cancelada: boolean;
+      fecha_cancelacion: string | null;
+      motivo_cancelacion: string | null;
+      folio_sustitucion: string | null;
     }>(
       `
       SELECT
-        id_venta,
-        fecha_hora_local AS fecha_emision,
-        sucursal_pos     AS sucursal,
-        caja,
-        subtotal::text   AS subtotal,
-        impuesto::text   AS impuestos,
-        total::text      AS total
+        venta_id,
+        fecha_emision,
+        sucursal_id,
+        caja_id,
+        serie_documento,
+        folio_numero,
+        subtotal::text AS subtotal,
+        impuesto::text AS impuesto,
+        total::text    AS total,
+        cancelada,
+        fecha_cancelacion,
+        motivo_cancelacion,
+        folio_sustitucion
       FROM ventas
-      WHERE id_venta = $1
+      WHERE venta_id = $1::bigint
+      LIMIT 1
       `,
-      [idVenta]
+      [ventaId]
     );
 
     if (ventasRows.length === 0) {
@@ -364,50 +404,52 @@ router.get("/ventas/:id_venta", async (req, res) => {
 
     // Líneas
     const lineas = await query<{
-      id_venta: number;
-      line_no: number;
-      sku: string;
+      venta_id: number;
+      renglon: number;
+      articulo: string;
       cantidad: string;
       precio_unitario: string;
       descuento: string;
-      total_linea: string;
-      almacen: string | null;
+      impuesto_linea: string;
+      importe_linea: string;
+      almacen_id: string | null;
     }>(
       `
       SELECT
-        id_venta,
-        numero_linea           AS line_no,
-        sku,
-        cantidad::text         AS cantidad,
-        precio_unitario::text  AS precio_unitario,
-        descuento::text        AS descuento,
-        total_linea::text      AS total_linea,
-        almacen_pos            AS almacen
+        venta_id,
+        renglon,
+        articulo,
+        cantidad::text        AS cantidad,
+        precio_unitario::text AS precio_unitario,
+        descuento::text       AS descuento,
+        impuesto_linea::text  AS impuesto_linea,
+        importe_linea::text   AS importe_linea,
+        almacen_id
       FROM lineas_venta
-      WHERE id_venta = $1
-      ORDER BY numero_linea
+      WHERE venta_id = $1::bigint
+      ORDER BY renglon ASC
       `,
-      [idVenta]
+      [ventaId]
     );
 
     // Pagos
     const pagos = await query<{
-      id_venta: number;
+      venta_id: number;
       idx: number;
       metodo: string;
       monto: string;
     }>(
       `
       SELECT
-        id_venta,
-        indice        AS idx,
+        venta_id,
+        idx,
         metodo,
-        monto::text   AS monto
+        monto::text AS monto
       FROM pagos_venta
-      WHERE id_venta = $1
-      ORDER BY indice
+      WHERE venta_id = $1::bigint
+      ORDER BY idx ASC
       `,
-      [idVenta]
+      [ventaId]
     );
 
     return res.json({
@@ -417,11 +459,12 @@ router.get("/ventas/:id_venta", async (req, res) => {
       pagos,
     });
   } catch (error) {
-    console.error("[GET /ventas/:id_venta] error:", error);
+    console.error("[GET /ventas/:venta_id] error:", error);
     return res.status(500).json({
       ok: false,
       error: "VENTA_DETALLE_FAILED",
     });
   }
 });
+
 export default router;
