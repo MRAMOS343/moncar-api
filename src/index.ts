@@ -6,9 +6,10 @@ import cors from "cors";
 import ventasRouter from "./routes/ventas";
 import healthRouter from "./routes/health";
 import inventarioRouter from "./routes/inventario";
-import fichasRouter from "./routes/fichas-tecnicas";
+import fichasRouter from "./routes/fichasTecnicas";
 import authRouter from "./routes/auth";
 import warehousesRouter from "./routes/warehouses";
+import productosRouter from "./routes/productos";
 
 
 
@@ -29,7 +30,7 @@ app.use(debugRouter);
 app.use(fichasRouter);
 app.use(authRouter);
 app.use(warehousesRouter);
-
+app.use(productosRouter);
 
 
 // Endpoint de diagnóstico rápido
