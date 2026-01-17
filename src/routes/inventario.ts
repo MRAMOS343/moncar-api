@@ -1,6 +1,6 @@
 // src/routes/inventario.ts
 import { Router, Request, Response } from "express";
-import { query } from "../db";
+import { query, withTransaction } from "../db";
 import { requireAuth } from "../middleware/requireAuth";
 
 const router = Router();
@@ -16,20 +16,37 @@ function parseCursorText(raw: unknown): string | null {
   return s ? s : null;
 }
 
+function parseDecimal(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+function requireRoles(req: Request, res: Response, roles: string[]) {
+  const auth = (req as any).auth as { rol?: string; sub?: string } | undefined;
+  const rol = auth?.rol ?? "";
+  if (!roles.includes(rol)) {
+    res.status(403).json({ ok: false, error: "FORBIDDEN" });
+    return null;
+  }
+  return auth;
+}
+
 /**
  * GET /inventario
  *
- * Lista de existencias por SKU y almacén.
  * Query params:
- *   sku?: filtrar por SKU exacto
- *   almacen?: filtrar por almacén exacto
- *   limit?: número máximo de filas (default 100, máx 500)
+ *   sku?: exacto
+ *   almacen?: exacto
+ *   limit?: default 100, max 500
  *
- * Paginación (opcional, recomendado si crece):
- *   cursor_sku?: sku del último registro recibido
- *   cursor_almacen?: almacen del último registro recibido
+ * Paginación (opcional, keyset ASC):
+ *   cursor_sku?: sku último
+ *   cursor_almacen?: almacen último
  *
- * Regla UI: clamp de negativos a 0 en la respuesta.
+ * Respuesta:
+ *  { ok:true, items:[...], next_cursor:{cursor_sku,cursor_almacen}|null }
  */
 router.get("/inventario", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -37,7 +54,6 @@ router.get("/inventario", requireAuth, async (req: Request, res: Response) => {
     const almacen = String(req.query.almacen ?? "").trim();
     const limit = clampLimit(req.query.limit, 100, 500);
 
-    // Cursor compuesto (keyset)
     const cursorSku = parseCursorText(req.query.cursor_sku);
     const cursorAlmacen = parseCursorText(req.query.cursor_almacen);
 
@@ -49,7 +65,6 @@ router.get("/inventario", requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    // Filtros
     const filtros: string[] = [];
     const params: any[] = [];
 
@@ -63,7 +78,6 @@ router.get("/inventario", requireAuth, async (req: Request, res: Response) => {
       params.push(almacen);
     }
 
-    // Cursor: (sku, almacen) > (cursorSku, cursorAlmacen) para ORDER BY ASC
     if (cursorSku && cursorAlmacen) {
       filtros.push(`(sku, almacen) > ($${params.length + 1}, $${params.length + 2})`);
       params.push(cursorSku, cursorAlmacen);
@@ -91,15 +105,14 @@ router.get("/inventario", requireAuth, async (req: Request, res: Response) => {
       [...params, limit]
     );
 
-    // clamp de negativos a 0 (pero devolvemos string para consistencia)
+    // UI clamp (por si existiera un valor negativo viejo en DB)
     const items = rows.map((r) => {
       const raw = Number(r.existencia ?? "0");
       const safe = Number.isFinite(raw) ? Math.max(0, raw) : 0;
-
       return {
         sku: r.sku,
         almacen: r.almacen,
-        existencia: safe.toFixed(4).replace(/\.?0+$/, ""), // "12", "12.5", "12.3456"
+        existencia: safe.toFixed(4).replace(/\.?0+$/, ""),
         actualizado_el: r.actualizado_el,
       };
     });
@@ -110,16 +123,97 @@ router.get("/inventario", requireAuth, async (req: Request, res: Response) => {
     return res.json({
       ok: true,
       items,
-      next_cursor: hasNext
-        ? { cursor_sku: last!.sku, cursor_almacen: last!.almacen }
-        : null,
+      next_cursor: hasNext ? { cursor_sku: last!.sku, cursor_almacen: last!.almacen } : null,
     });
   } catch (error) {
     console.error("[GET /inventario] error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "INVENTARIO_LIST_FAILED",
+    return res.status(500).json({ ok: false, error: "INVENTARIO_LIST_FAILED" });
+  }
+});
+
+/**
+ * POST /inventario/adjust
+ *
+ * Body:
+ *  { sku: string, almacen: string, delta: number, motivo: string, referencia?: string }
+ *
+ * Hace:
+ *  1) INSERT en inventario_movimientos
+ *  2) UPSERT inventario sumando delta (clamp a 0)
+ *
+ * Respuesta:
+ *  { ok:true, sku, almacen, existencia, movimiento_id }
+ */
+router.post("/inventario/adjust", requireAuth, async (req: Request, res: Response) => {
+  // Permisos: ajusta roles a tu gusto
+  const auth = requireRoles(req, res, ["admin", "gerente"]);
+  if (!auth) return;
+
+  const sku = String(req.body?.sku ?? "").trim();
+  const almacen = String(req.body?.almacen ?? "").trim();
+  const motivo = String(req.body?.motivo ?? "").trim();
+  const referencia = req.body?.referencia != null ? String(req.body.referencia).trim() : null;
+
+  const delta = parseDecimal(req.body?.delta);
+
+  if (!sku) return res.status(400).json({ ok: false, error: "SKU_REQUERIDO" });
+  if (!almacen) return res.status(400).json({ ok: false, error: "ALMACEN_REQUERIDO" });
+  if (delta === null) return res.status(400).json({ ok: false, error: "DELTA_INVALIDO" });
+  if (!motivo) return res.status(400).json({ ok: false, error: "MOTIVO_REQUERIDO" });
+
+  try {
+    const result = await withTransaction(async (client) => {
+      // 1) Insert movimiento
+      const mov = await client.query<{ id: string }>(
+        `
+        INSERT INTO inventario_movimientos (
+          sku, almacen, delta, motivo, actor_user_id, referencia
+        ) VALUES (
+          $1, $2, $3::numeric, $4, $5::uuid, $6
+        )
+        RETURNING id::text AS id
+        `,
+        [sku, almacen, delta, motivo, auth.sub ?? null, referencia]
+      );
+
+      const movimientoId = mov.rows[0].id;
+
+      // 2) Upsert inventario con clamp a 0
+      // Nota: requiere PK (sku, almacen)
+      const up = await client.query<{
+        existencia: string;
+        actualizado_el: string;
+      }>(
+        `
+        INSERT INTO inventario (sku, almacen, existencia, actualizado_el)
+        VALUES ($1, $2, GREATEST(0, $3::numeric), now())
+        ON CONFLICT (sku, almacen) DO UPDATE
+        SET
+          existencia = GREATEST(0, inventario.existencia + $3::numeric),
+          actualizado_el = now()
+        RETURNING existencia::text AS existencia, actualizado_el
+        `,
+        [sku, almacen, delta]
+      );
+
+      return {
+        movimiento_id: movimientoId,
+        existencia: up.rows[0].existencia,
+        actualizado_el: up.rows[0].actualizado_el,
+      };
     });
+
+    return res.json({
+      ok: true,
+      sku,
+      almacen,
+      existencia: Number(result.existencia).toFixed(4).replace(/\.?0+$/, ""),
+      actualizado_el: result.actualizado_el,
+      movimiento_id: result.movimiento_id,
+    });
+  } catch (error) {
+    console.error("[POST /inventario/adjust] error:", error);
+    return res.status(500).json({ ok: false, error: "INVENTARIO_ADJUST_FAILED" });
   }
 });
 
