@@ -47,12 +47,8 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 
 // Levantar servidor HTTP
 app.listen(PORT, () => {
+  logger.info({ msg: "server.started", PORT });
   console.log(`API escuchando en puerto ${PORT}`);
 });
-
-app.listen(PORT, () => {
-  logger.info({ msg: 'server.started',PORT});
-});
-
 export default app;
 

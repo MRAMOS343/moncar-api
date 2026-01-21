@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { pool, withTransaction, query } from "../db";
 import { BatchVentasSchema } from "../schemas/ventas";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireAnyRole } from "../middleware/requireAnyRole";
 
 const router = Router();
 
@@ -15,7 +16,7 @@ const router = Router();
  *   const FORCED_SUCURSAL_ID = process.env.FORCED_SUCURSAL_ID ?? null;
  * y usa el valor real del payload/claims.
  */
-const FORCED_SUCURSAL_ID = "moncar";
+const FORCED_SUCURSAL_ID = process.env.FORCED_SUCURSAL_ID ?? "moncar";
 
 function parseBool(v: unknown): boolean {
   const s = String(v ?? "").trim().toLowerCase();
@@ -27,7 +28,6 @@ function parseCursorFecha(v: unknown): string | null {
   if (!s) return null;
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return null;
-  // Guardamos ISO estable para query param/response
   return d.toISOString();
 }
 
@@ -49,6 +49,8 @@ function parseCursorVentaId(v: unknown): number | null {
  */
 router.post(
   ["/ventas/import-batch", "/sales/import-batch"],
+  requireAuth,
+  requireAnyRole(["admin", "sync"]),
   async (req: Request, res: Response) => {
     const parseResult = BatchVentasSchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -72,10 +74,18 @@ router.post(
     }
 
     const batchId = randomUUID();
-    const sourceId = "POS-MYBUSINESS"; // por ahora fijo
+
+    // ✅ SOURCE_ID viene del .env (obligatorio)
+    const sourceId = process.env.SOURCE_ID;
+    if (!sourceId) {
+      return res.status(500).json({
+        ok: false,
+        error: "SERVER_MISCONFIG_SOURCE_ID",
+      });
+    }
 
     let okCount = 0;
-    let dupCount = 0;
+    let dupCount = 0; // (por ahora no distinguimos dup vs update; UPSERT lo hace idempotente)
     let errorCount = 0;
     const errorDetails: { id_venta: number; reason: string }[] = [];
 
@@ -86,9 +96,7 @@ router.post(
 
       // total = subtotal + impuesto (acordado)
       const subtotal = Number(venta.subtotal ?? 0);
-      const impuesto = Number(
-        (venta as any).impuestos ?? (venta as any).impuesto ?? 0
-      );
+      const impuesto = Number((venta as any).impuestos ?? (venta as any).impuesto ?? 0);
       const total = subtotal + impuesto;
 
       try {
@@ -123,7 +131,7 @@ router.post(
             [
               venta.id_venta,
               venta.fecha_emision,
-              FORCED_SUCURSAL_ID, // ✅ FORZADO (moncar)
+              FORCED_SUCURSAL_ID, // ✅ FORZADO
               (venta as any).caja ?? null,
               (venta as any).serie_documento ?? null,
               (venta as any).folio_numero ?? null,
@@ -134,26 +142,25 @@ router.post(
           );
 
           // --- Líneas (reemplazo total idempotente) ---
-          await client.query("DELETE FROM lineas_venta WHERE venta_id = $1", [
-            venta.id_venta,
-          ]);
+          await client.query("DELETE FROM lineas_venta WHERE venta_id = $1", [venta.id_venta]);
 
           for (const [idx, linea] of venta.lineas.entries()) {
             const renglon = idx + 1;
 
             const cantidad = Number(linea.cantidad ?? 0);
-            const precioUnitario = Number(
-              (linea as any).precio ?? (linea as any).precio_unitario ?? 0
-            );
+            const precioUnitario = Number((linea as any).precio ?? (linea as any).precio_unitario ?? 0);
             const descuento = Number(linea.descuento ?? 0);
-            const impuestoLinea = Number(
-              (linea as any).impuesto ?? (linea as any).impuesto_linea ?? 0
-            );
+            const impuestoLinea = Number((linea as any).impuesto ?? (linea as any).impuesto_linea ?? 0);
 
             const importeLinea =
               (linea as any).importe != null
                 ? Number((linea as any).importe)
                 : cantidad * precioUnitario - descuento;
+
+            const almacenId =
+              (linea as any).almacen_id ??
+              (linea as any).almacen ??
+              null;
 
             await client.query(
               `
@@ -182,7 +189,7 @@ router.post(
                 descuento,
                 impuestoLinea,
                 importeLinea,
-                (linea as any).almacen ?? FORCED_SUCURSAL_ID,
+                almacenId,
                 (linea as any).id_salida_origen ?? null,
                 (linea as any).estado_linea ?? null,
               ]
@@ -190,9 +197,7 @@ router.post(
           }
 
           // --- Pagos (reemplazo total idempotente) ---
-          await client.query("DELETE FROM pagos_venta WHERE venta_id = $1", [
-            venta.id_venta,
-          ]);
+          await client.query("DELETE FROM pagos_venta WHERE venta_id = $1", [venta.id_venta]);
 
           for (const pago of venta.pagos) {
             await client.query(
@@ -276,10 +281,7 @@ router.post(
           [sourceId, maxIdVenta]
         );
       } catch (e) {
-        console.error(
-          "[ventas.import-batch] error actualizando estado_sincronizacion",
-          e
-        );
+        console.error("[ventas.import-batch] error actualizando estado_sincronizacion", e);
       }
     }
 
@@ -330,7 +332,7 @@ router.get(["/ventas", "/sales"], requireAuth, async (req: Request, res: Respons
     const cursorFechaIso = parseCursorFecha(req.query.cursor_fecha);
     const cursorVentaId = parseCursorVentaId(req.query.cursor_venta_id);
 
-    // Si mandan uno sin el otro, lo tratamos como inválido → 400 (evita paginación inconsistente)
+    // Si mandan uno sin el otro, lo tratamos como inválido → 400
     if ((cursorFechaIso && cursorVentaId == null) || (!cursorFechaIso && cursorVentaId != null)) {
       return res.status(400).json({
         ok: false,
@@ -374,9 +376,9 @@ router.get(["/ventas", "/sales"], requireAuth, async (req: Request, res: Respons
         sinceDate,
         sucursalId,
         includeCancelled,
-        cursorFechaIso,                 // $4
-        cursorVentaId ?? 0,             // $5 (se ignora si $4 es NULL)
-        pageSize,                       // $6
+        cursorFechaIso,     // $4
+        cursorVentaId ?? 0, // $5 (se ignora si $4 es NULL)
+        pageSize,           // $6
       ]
     );
 
@@ -416,7 +418,7 @@ router.get(
     }
 
     try {
-      // Encabezado (forzamos sucursal_id)
+      // Encabezado
       const ventasRows = await query<{
         venta_id: number;
         fecha_emision: string;
