@@ -52,6 +52,20 @@ router.post(
   requireAuth,
   requireAnyRole(["admin", "sync"]),
   async (req: Request, res: Response) => {
+    console.log("[import-batch] sample keys:", Object.keys((req.body?.[0] ?? {})));
+    console.log("[import-batch] sample header:", {
+      id_venta: req.body?.[0]?.id_venta,
+      cliente_origen: req.body?.[0]?.cliente_origen,
+      cliente: req.body?.[0]?.cliente,
+      datos_origen: req.body?.[0]?.datos_origen,
+      datos: req.body?.[0]?.datos,
+      estado_origen: req.body?.[0]?.estado_origen,
+      estado: req.body?.[0]?.estado,
+      usu_hora: req.body?.[0]?.usu_hora,
+      usu_fecha: req.body?.[0]?.usu_fecha,
+      no_referencia: req.body?.[0]?.no_referencia,
+    });
+
     const parseResult = BatchVentasSchema.safeParse(req.body);
     if (!parseResult.success) {
       return res.status(400).json({
