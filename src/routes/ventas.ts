@@ -99,6 +99,35 @@ router.post(
       const impuesto = Number((venta as any).impuestos ?? (venta as any).impuesto ?? 0);
       const total = subtotal + impuesto;
 
+      // --- Mapeos con compatibilidad hacia atrás ---
+      const cajaVal = (venta as any).caja ?? (venta as any).caja_id ?? null;
+
+      const serieVal =
+        (venta as any).serie ?? (venta as any).serie_documento ?? (venta as any).serieDocumento ?? null;
+
+      const folioVal =
+        (venta as any).folio ??
+        (venta as any).folio_numero ??
+        (venta as any).folioNumero ??
+        (venta as any).no_referencia ??
+        (venta as any).NO_REFEREN ??
+        null;
+
+      // NUEVO: campos POS a persistir en ventas
+      const estadoVal = (venta as any).estado ?? (venta as any).estado_origen ?? null;
+      const clienteVal = (venta as any).cliente ?? (venta as any).cliente_origen ?? null;
+      const datosVal = (venta as any).datos ?? (venta as any).datos_origen ?? null;
+      const usuFechaVal = (venta as any).usu_fecha ?? null;
+      const usuHoraVal = (venta as any).usu_hora ?? null;
+
+      // Guardamos referencia tal cual (útil para auditoría)
+      const noRefVal =
+        (venta as any).no_referencia ??
+        (venta as any).NO_REFEREN ??
+        (venta as any).folio ??
+        (venta as any).folio_numero ??
+        null;
+
       try {
         await withTransaction(async (client) => {
           // --- Encabezado (UPSERT) ---
@@ -113,9 +142,15 @@ router.post(
               folio_numero,
               subtotal,
               impuesto,
-              total
+              total,
+              estado_origen,
+              cliente_origen,
+              datos_origen,
+              usu_fecha,
+              usu_hora,
+              no_referencia
             ) VALUES (
-              $1,$2,$3,$4,$5,$6,$7,$8,$9
+              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
             )
             ON CONFLICT (venta_id) DO UPDATE SET
               fecha_emision     = EXCLUDED.fecha_emision,
@@ -126,18 +161,30 @@ router.post(
               subtotal          = EXCLUDED.subtotal,
               impuesto          = EXCLUDED.impuesto,
               total             = EXCLUDED.total,
+              estado_origen     = EXCLUDED.estado_origen,
+              cliente_origen    = EXCLUDED.cliente_origen,
+              datos_origen      = EXCLUDED.datos_origen,
+              usu_fecha         = EXCLUDED.usu_fecha,
+              usu_hora          = EXCLUDED.usu_hora,
+              no_referencia     = EXCLUDED.no_referencia,
               actualizado_en    = now()
             `,
             [
               venta.id_venta,
               venta.fecha_emision,
               FORCED_SUCURSAL_ID, // ✅ FORZADO
-              (venta as any).caja ?? null,
-              (venta as any).serie_documento ?? null,
-              (venta as any).folio_numero ?? null,
+              cajaVal,
+              serieVal,
+              folioVal,
               subtotal,
               impuesto,
               total,
+              estadoVal,
+              clienteVal,
+              datosVal,
+              usuFechaVal,
+              usuHoraVal,
+              noRefVal,
             ]
           );
 
@@ -149,18 +196,29 @@ router.post(
 
             const cantidad = Number(linea.cantidad ?? 0);
             const precioUnitario = Number((linea as any).precio ?? (linea as any).precio_unitario ?? 0);
-            const descuento = Number(linea.descuento ?? 0);
+            const descuento = Number((linea as any).descuento ?? 0);
+
+            // partvta.IMPUESTO normalmente es tasa (16). Si tu extractor manda tasa aquí,
+            // por ahora lo persistimos en impuesto_linea tal cual. (Luego lo normalizamos si quieres.)
             const impuestoLinea = Number((linea as any).impuesto ?? (linea as any).impuesto_linea ?? 0);
 
             const importeLinea =
               (linea as any).importe != null
                 ? Number((linea as any).importe)
-                : cantidad * precioUnitario - descuento;
+                : Number.isFinite(cantidad) && Number.isFinite(precioUnitario)
+                ? cantidad * precioUnitario - descuento
+                : 0;
 
-            const almacenId =
-              (linea as any).almacen_id ??
-              (linea as any).almacen ??
-              null;
+            const almacenId = (linea as any).almacen_id ?? (linea as any).almacen ?? null;
+
+            // NUEVO: extras líneas (si ya agregaste columnas en DB)
+            const observOrigen = (linea as any).observ ?? (linea as any).observ_origen ?? null;
+            const usuarioOrigen = (linea as any).usuario ?? (linea as any).usuario_origen ?? null;
+            const lineaUsuHora = (linea as any).usuhora ?? (linea as any).usu_hora ?? null;
+            const lineaUsuFecha = (linea as any).usu_fecha ?? null;
+
+            const idSalidaOrigen = (linea as any).id_salida ?? (linea as any).id_salida_origen ?? null;
+            const estadoLinea = (linea as any).estado ?? (linea as any).estado_linea ?? null;
 
             await client.query(
               `
@@ -175,9 +233,13 @@ router.post(
                 importe_linea,
                 almacen_id,
                 id_salida_origen,
-                estado_linea
+                estado_linea,
+                observ_origen,
+                usuario_origen,
+                usu_hora,
+                usu_fecha
               ) VALUES (
-                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
               )
               `,
               [
@@ -190,8 +252,12 @@ router.post(
                 impuestoLinea,
                 importeLinea,
                 almacenId,
-                (linea as any).id_salida_origen ?? null,
-                (linea as any).estado_linea ?? null,
+                idSalidaOrigen,
+                estadoLinea,
+                observOrigen,
+                usuarioOrigen,
+                lineaUsuHora,
+                lineaUsuFecha,
               ]
             );
           }
@@ -199,7 +265,7 @@ router.post(
           // --- Pagos (reemplazo total idempotente) ---
           await client.query("DELETE FROM pagos_venta WHERE venta_id = $1", [venta.id_venta]);
 
-          for (const pago of venta.pagos) {
+          for (const pago of venta.pagos ?? []) {
             await client.query(
               `
               INSERT INTO pagos_venta(
@@ -213,9 +279,9 @@ router.post(
               `,
               [
                 venta.id_venta,
-                (pago as any).idx,
-                (pago as any).metodo,
-                (pago as any).monto,
+                Number((pago as any).idx),
+                String((pago as any).metodo),
+                Number((pago as any).monto),
               ]
             );
           }
@@ -297,22 +363,6 @@ router.post(
 
 /**
  * GET /ventas  (alias: /sales)
- *
- * Listado paginado con orden "más recientes primero":
- *   ORDER BY fecha_emision DESC, venta_id DESC
- *
- * Cursor compuesto (estable):
- *  - cursor_fecha: ISO timestamp
- *  - cursor_venta_id: bigint
- *
- * Query:
- *  - from=2025-01-01 (default)
- *  - limit (default 50, max 100)
- *  - include_cancelled=1|true (opcional)
- *  - cursor_fecha=... (opcional)
- *  - cursor_venta_id=... (opcional)
- *
- * NOTA: sucursal_id se fuerza a moncar (single-store)
  */
 router.get(["/ventas", "/sales"], requireAuth, async (req: Request, res: Response) => {
   try {
@@ -376,9 +426,9 @@ router.get(["/ventas", "/sales"], requireAuth, async (req: Request, res: Respons
         sinceDate,
         sucursalId,
         includeCancelled,
-        cursorFechaIso,     // $4
-        cursorVentaId ?? 0, // $5 (se ignora si $4 es NULL)
-        pageSize,           // $6
+        cursorFechaIso, // $4
+        cursorVentaId ?? 0, // $5
+        pageSize, // $6
       ]
     );
 
@@ -404,8 +454,6 @@ router.get(["/ventas", "/sales"], requireAuth, async (req: Request, res: Respons
 /**
  * GET /ventas/:venta_id  (alias: /sales/:venta_id)
  * Detalle: encabezado + líneas + pagos
- *
- * NOTA: valida que la venta pertenezca a moncar (single-store)
  */
 router.get(
   ["/ventas/:venta_id", "/sales/:venta_id"],
@@ -418,7 +466,6 @@ router.get(
     }
 
     try {
-      // Encabezado
       const ventasRows = await query<{
         venta_id: number;
         fecha_emision: string;
@@ -433,6 +480,12 @@ router.get(
         fecha_cancelacion: string | null;
         motivo_cancelacion: string | null;
         folio_sustitucion: string | null;
+
+        // NUEVO (si existen en DB)
+        estado_origen: string | null;
+        cliente_origen: string | null;
+        usu_hora: string | null;
+        no_referencia: string | null;
       }>(
         `
         SELECT
@@ -448,7 +501,11 @@ router.get(
           cancelada,
           fecha_cancelacion,
           motivo_cancelacion,
-          folio_sustitucion
+          folio_sustitucion,
+          estado_origen,
+          cliente_origen,
+          usu_hora,
+          no_referencia
         FROM ventas
         WHERE venta_id = $1::bigint
           AND sucursal_id = $2::text
@@ -463,7 +520,6 @@ router.get(
 
       const venta = ventasRows[0];
 
-      // Líneas
       const lineas = await query<{
         venta_id: number;
         renglon: number;
@@ -474,6 +530,12 @@ router.get(
         impuesto_linea: string;
         importe_linea: string;
         almacen_id: string | null;
+
+        // NUEVO (si existen en DB)
+        observ_origen: string | null;
+        usuario_origen: string | null;
+        usu_hora: string | null;
+        usu_fecha: string | null;
       }>(
         `
         SELECT
@@ -485,7 +547,11 @@ router.get(
           descuento::text       AS descuento,
           impuesto_linea::text  AS impuesto_linea,
           importe_linea::text   AS importe_linea,
-          almacen_id
+          almacen_id,
+          observ_origen,
+          usuario_origen,
+          usu_hora,
+          usu_fecha
         FROM lineas_venta
         WHERE venta_id = $1::bigint
         ORDER BY renglon ASC
@@ -493,7 +559,6 @@ router.get(
         [ventaId]
       );
 
-      // Pagos
       const pagos = await query<{
         venta_id: number;
         idx: number;
