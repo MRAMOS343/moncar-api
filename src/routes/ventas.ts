@@ -154,15 +154,15 @@ router.post(
               caja_id,
               serie_documento,
               folio_numero,
-              subtotal,
-              impuesto,
-              total,
+              no_referencia,
               cliente_origen,
               datos_origen,
               estado_origen,
               usu_fecha,
               usu_hora,
-              no_referencia
+              subtotal,
+              impuesto,
+              total
             ) VALUES (
               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
             )
@@ -172,33 +172,35 @@ router.post(
               caja_id           = EXCLUDED.caja_id,
               serie_documento   = EXCLUDED.serie_documento,
               folio_numero      = EXCLUDED.folio_numero,
-              subtotal          = EXCLUDED.subtotal,
-              impuesto          = EXCLUDED.impuesto,
-              total             = EXCLUDED.total,
+              no_referencia     = EXCLUDED.no_referencia,
               cliente_origen    = EXCLUDED.cliente_origen,
               datos_origen      = EXCLUDED.datos_origen,
               estado_origen     = EXCLUDED.estado_origen,
               usu_fecha         = EXCLUDED.usu_fecha,
               usu_hora          = EXCLUDED.usu_hora,
-              no_referencia     = EXCLUDED.no_referencia,
+              subtotal          = EXCLUDED.subtotal,
+              impuesto          = EXCLUDED.impuesto,
+              total             = EXCLUDED.total,
               actualizado_en    = now()
             `,
             [
               venta.id_venta,
               venta.fecha_emision,
-              FORCED_SUCURSAL_ID, // ✅ FORZADO
-              cajaVal,
-              serieVal,
-              folioVal,
+              FORCED_SUCURSAL_ID,                // ✅ forzado
+              (venta as any).caja ?? null,
+              (venta as any).serie ?? null,      // OJO: tu payload trae "serie"
+              (venta as any).folio ?? null,      // OJO: tu payload trae "folio"
+              (venta as any).no_referencia ?? null,
+
+              (venta as any).cliente_origen ?? null,
+              (venta as any).datos_origen ?? null,
+              (venta as any).estado_origen ?? null,
+              (venta as any).usu_fecha ?? null,
+              (venta as any).usu_hora ?? null,
+
               subtotal,
               impuesto,
               total,
-              clienteVal,
-              datosVal,
-              estadoVal,
-              usuFechaVal,
-              usuHoraVal,
-              noRefVal,
             ]
           );
 
