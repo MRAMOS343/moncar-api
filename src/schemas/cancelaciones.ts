@@ -2,35 +2,35 @@
 import { z } from "zod";
 
 const NullishTrimmed = z
-  .union([z.string(), z.null(), z.undefined()])
-  .transform((v) => {
-    const s = String(v ?? "").trim();
-    return s ? s : null;
-  });
-
-const IsoDateString = z
   .string()
-  .transform((s) => new Date(s))
-  .refine((d) => !Number.isNaN(d.getTime()), "Invalid date")
-  .transform((d) => d.toISOString());
+  .transform((s) => s.trim())
+  .refine(() => true)
+  .optional()
+  .nullable();
+
+const NullishIsoDate = z
+  .string()
+  .datetime()
+  .optional()
+  .nullable();
 
 export const CancelacionSchema = z.object({
-  // Id (PK origen, cursor)
-  id_cancelacion_origen: z.number().int().positive(),
+  id_cancelacion_origen: z.number().int().nonnegative(),
 
-  // Referencia a venta (puede ser null si todavía no existe la venta)
-  venta_id: z.number().int().positive().nullable().optional(),
+  venta_id: z.number().int().nonnegative().optional().nullable(),
 
-  // Fechas (opcionales, pero si vienen deben ser ISO)
-  fecha_emision: IsoDateString.nullable().optional(),
-  fecha_cancelacion: IsoDateString.nullable().optional(),
+  fecha_emision: NullishIsoDate,
+  fecha_cancelacion: NullishIsoDate,
 
-  // Campos opcionales (según tu tabla)
-  motivo_cancelacion: NullishTrimmed.optional(),
-  folio_sustitucion: NullishTrimmed.optional(),
-  uuid_cfdi: NullishTrimmed.optional(),
+  // nuevos (objetivo)
+  cliente_origen: NullishTrimmed,
+  cliente_nombre: NullishTrimmed,
+  importe: z.number().optional().nullable(),
+
+  // ya existían / útiles
+  motivo_cancelacion: NullishTrimmed,
+  folio_sustitucion: NullishTrimmed,
+  uuid_cfdi: NullishTrimmed,
 });
 
 export const BatchCancelacionesSchema = z.array(CancelacionSchema);
-export type CancelacionInput = z.infer<typeof CancelacionSchema>;
-
