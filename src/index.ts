@@ -10,6 +10,8 @@ import fichasRouter from "./routes/fichasTecnicas";
 import authRouter from "./routes/auth";
 import warehousesRouter from "./routes/warehouses";
 import productosRouter from "./routes/productos";
+import cancelacionesRouter from "./routes/cancelaciones";
+
 
 
 
@@ -31,6 +33,8 @@ app.use(fichasRouter);
 app.use(authRouter);
 app.use(warehousesRouter);
 app.use(productosRouter);
+app.use(cancelacionesRouter);
+
 
 
 // Endpoint de diagnóstico rápido
