@@ -14,22 +14,24 @@ export const PagoSchema = z.object({
   monto: z.number(),
 });
 
-export const LineaVentaSchema = z.object({
-  articulo: z.string().trim().min(1),
-  cantidad: z.number(),
-  precio: z.number(),
+export const LineaVentaSchema = z
+  .object({
+    articulo: z.string().trim().min(1),
+    cantidad: z.number(),
+    precio: z.number(),
 
-  impuesto: z.number().optional().nullable(),
-  observ: NullishTrimmed.optional(),
-  id_salida: z.number().int().optional().nullable(),
-  usuario: NullishTrimmed.optional(),   // si lo usas
-  usuhora: NullishTrimmed.optional(),   // si lo usas
-  almacen: NullishTrimmed.optional(),
-  estado: NullishTrimmed.optional(),
+    impuesto: z.number().optional().nullable(),
+    observ: NullishTrimmed.optional(),
+    id_salida: z.number().int().optional().nullable(),
+    usuario: NullishTrimmed.optional(),
+    usuhora: NullishTrimmed.optional(),
+    almacen: NullishTrimmed.optional(),
+    estado: NullishTrimmed.optional(),
 
-  // si ya los traes en extractor:
-  usu_fecha: z.string().optional().nullable(), // o date string
-}).passthrough(); // opcional, solo si quieres tolerar extras en líneas
+    // si tu extractor ya lo trae:
+    usu_fecha: z.string().optional().nullable(),
+  })
+  .passthrough();
 
 export const VentaSchema = z.object({
   id_venta: z.number().int(),
@@ -44,7 +46,7 @@ export const VentaSchema = z.object({
   serie: NullishTrimmed.optional(),
   folio: NullishTrimmed.optional(),
 
-  // ---- NUEVOS (los que hoy se están perdiendo) ----
+  // Campos origen POS
   cliente_origen: NullishTrimmed.optional(),
   datos_origen: NullishTrimmed.optional(),
   estado_origen: NullishTrimmed.optional(),
