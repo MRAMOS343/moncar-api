@@ -11,6 +11,7 @@ import authRouter from "./routes/auth";
 import warehousesRouter from "./routes/warehouses";
 import productosRouter from "./routes/productos";
 import cancelacionesRouter from "./routes/cancelaciones";
+import equiposRouter from "./routes/equipos";
 
 
 
@@ -34,7 +35,7 @@ app.use(authRouter);
 app.use(warehousesRouter);
 app.use(productosRouter);
 app.use(cancelacionesRouter);
-
+app.use(equiposRouter);
 
 
 // Endpoint de diagnóstico rápido

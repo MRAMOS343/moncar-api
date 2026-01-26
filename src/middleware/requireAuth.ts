@@ -1,14 +1,15 @@
+// src/middleware/requireAuth.ts
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
 export type AuthClaims = {
   sub: string;                 // id_usuario (uuid en texto)
   rol?: string;                // admin|gerente|cajero|sync|...
-  role?: string;               // compat: algunos tokens traen "role"
-  sucursal_id?: string;        // opcional
-  correo?: string;             // opcional
-  email?: string;              // compat: algunos tokens traen "email"
-  source_id?: string;          // opcional (si decides meterlo en el token)
+  role?: string;               // compat
+  sucursal_id?: string;
+  correo?: string;
+  email?: string;              // compat
+  source_id?: string;
 };
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -27,15 +28,26 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const decoded = jwt.verify(token, secret) as AuthClaims;
 
-    // Normalización para compatibilidad: rol <- role
+    // Normalización: rol <- role
     if (!decoded.rol && decoded.role) decoded.rol = decoded.role;
 
-    // Normalización opcional: correo <- email
+    // Normalización: correo <- email
     if (!decoded.correo && decoded.email) decoded.correo = decoded.email;
 
+    // ✅ Estándar actual del repo
     (req as any).auth = decoded;
+
+    // ✅ Compat con rutas que esperan req.user
+    (req as any).user = {
+      id: String(decoded.sub),
+      role: String(decoded.rol ?? "user"),
+      sucursal_id: decoded.sucursal_id ?? null,
+      correo: decoded.correo ?? null,
+    };
+
     return next();
   } catch {
     return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
   }
 }
+
