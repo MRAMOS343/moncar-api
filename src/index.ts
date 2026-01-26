@@ -12,6 +12,7 @@ import warehousesRouter from "./routes/warehouses";
 import productosRouter from "./routes/productos";
 import cancelacionesRouter from "./routes/cancelaciones";
 import equiposRouter from "./routes/equipos";
+import usuariosRouter from "./routes/usuarios";
 
 
 
@@ -36,6 +37,7 @@ app.use(warehousesRouter);
 app.use(productosRouter);
 app.use(cancelacionesRouter);
 app.use(equiposRouter);
+app.use(usuariosRouter);
 
 
 // Endpoint de diagnóstico rápido
