@@ -13,6 +13,8 @@ import productosRouter from "./routes/productos";
 import cancelacionesRouter from "./routes/cancelaciones";
 import equiposRouter from "./routes/equipos";
 import usuariosRouter from "./routes/usuarios";
+import settingsRouter from "./routes/settings";
+import usersMeRouter from "./routes/usersMe";
 
 
 
@@ -38,6 +40,9 @@ app.use(productosRouter);
 app.use(cancelacionesRouter);
 app.use(equiposRouter);
 app.use(usuariosRouter);
+app.use(settingsRouter);
+app.use(usersMeRouter);
+
 
 
 // Endpoint de diagnóstico rápido
