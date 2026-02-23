@@ -2,7 +2,7 @@
 import { Router, Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { requireAuth } from "../middleware/requireAuth";
-import { query } from "../db";
+import { queryDocs as query } from "../dbDocs";
 
 import {
   s3,

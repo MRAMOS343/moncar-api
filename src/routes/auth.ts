@@ -1,5 +1,5 @@
 import { Router } from "express";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import * as jwt from "jsonwebtoken";
 import type { Secret, SignOptions } from "jsonwebtoken";
 import { requireAuth } from "../middleware/requireAuth";
