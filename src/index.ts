@@ -28,6 +28,8 @@ import rentasPagosRouter from "./routes/rentasPagos";
 
 // DOCUMENTOS
 import archivosRouter from "./routes/archivos";
+import rutasVehiculosRouter from "./routes/rutasVehiculos";
+import unidadesVehiculosRouter from "./routes/unidadesVehiculos";
 
 
 const app = express();
@@ -58,6 +60,8 @@ app.use(rentasPagosRouter);
 
 //Documentos
 app.use("/archivos", archivosRouter);
+app.use("/vehiculos", rutasVehiculosRouter);
+app.use("/vehiculos", unidadesVehiculosRouter);
 
 app.get("/ping", (_req, res) => {
   res.json({ ok: true, message: "pong", now: new Date().toISOString() });
