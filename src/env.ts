@@ -1,3 +1,4 @@
+
 // src/env.ts
 import dotenv from "dotenv";
 
@@ -22,9 +23,7 @@ export const env = {
     ssl: process.env.DB_SSL === "true",
   },
   jwt: {
-   
-    secret: process.env.JWT_SECRET || "monzopachuca",
+    secret: required("JWT_SECRET"), //  fail-fast, sin fallback
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   },
 };
-
