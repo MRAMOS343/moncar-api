@@ -5,7 +5,8 @@ import fs from "fs";
 import path from "path";
 import { env } from "./env";
 
-// Parse BIGINT (OID 20) -> number (ojo: si algún día superas 2^53-1, esto pierde precisión)
+// Parse BIGINT (OID 20) -> number
+// OJO: si algún día superas 2^53-1, esto pierde precisión.
 pg.types.setTypeParser(20, (val) => (val === null ? null : Number.parseInt(val, 10)));
 
 /**
@@ -24,7 +25,7 @@ const sslEnabled = env.db.ssl === true;
 const ssl: false | { rejectUnauthorized: true; ca: string } = sslEnabled
   ? {
       rejectUnauthorized: true, // ✅ NO permitir MITM / cert inválido
-      ca: readCaCert(),         // ✅ validar contra el CA
+      ca: readCaCert(), // ✅ validar contra el CA
     }
   : false;
 
@@ -59,7 +60,9 @@ export async function query<T = any>(text: string, params?: any[]): Promise<T[]>
  *     await client.query(...);
  *   });
  */
-export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+export async function withTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
   const client = await pool.connect();
 
   try {

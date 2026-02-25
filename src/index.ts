@@ -20,21 +20,31 @@ import debugRouter from "./routes/debug";
 import { logger } from "./logger";
 
 // RENTAS
-import rentasHealthRouter from "./routes/rentasHealth";
-import rentasPropiedadesRouter from "./routes/rentasPropiedades";
-import rentasContratosRouter from "./routes/rentasContratos";
-import rentasPagosRouter from "./routes/rentasPagos";
-
 
 // DOCUMENTOS
 import archivosRouter from "./routes/archivos";
 import rutasVehiculosRouter from "./routes/rutasVehiculos";
 import unidadesVehiculosRouter from "./routes/unidadesVehiculos";
 
-
 const app = express();
 
-app.use(cors());
+// CORS (allowlist por env: ALLOWED_ORIGINS="https://...,http://localhost:5173")
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // curl/postman sin Origin
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
 // POS
@@ -53,12 +63,8 @@ app.use(settingsRouter);
 app.use(usersMeRouter);
 
 // RENTAS
-app.use(rentasHealthRouter);
-app.use(rentasPropiedadesRouter);
-app.use(rentasContratosRouter);
-app.use(rentasPagosRouter);
 
-//Documentos
+// Documentos
 app.use("/archivos", archivosRouter);
 app.use("/vehiculos", rutasVehiculosRouter);
 app.use("/vehiculos", unidadesVehiculosRouter);
@@ -75,4 +81,3 @@ app.listen(PORT, () => {
 });
 
 export default app;
-

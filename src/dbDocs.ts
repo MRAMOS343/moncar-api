@@ -1,19 +1,26 @@
 // src/dbDocs.ts
 import { Pool, type PoolClient } from "pg";
+import fs from "fs";
+import path from "path";
+import { env } from "./env";
 
-function mustEnv(k: string): string {
-  const v = process.env[k];
-  if (!v) throw new Error(`Falta variable de entorno: ${k}`);
-  return v;
+function readCaCert(): string {
+  const p = process.env.DB_CA_CERT_PATH ?? "./ca-certificate.crt";
+  const abs = path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
+  return fs.readFileSync(abs, "utf8");
 }
 
+const ssl: false | { rejectUnauthorized: true; ca: string } = env.db.ssl
+  ? { rejectUnauthorized: true, ca: readCaCert() }
+  : false;
+
 export const poolDocs = new Pool({
-  host: mustEnv("DOCS_DB_HOST"),
-  port: Number(mustEnv("DOCS_DB_PORT")),
-  user: mustEnv("DOCS_DB_USER"),
-  password: mustEnv("DOCS_DB_PASSWORD"),
-  database: mustEnv("DOCS_DB_NAME"),
-  ssl: { rejectUnauthorized: false },
+  host: env.db.host,
+  port: env.db.port,
+  user: env.db.user,
+  password: env.db.password,
+  database: env.db.database,
+  ssl,
 });
 
 export async function queryDocs<T = any>(text: string, params?: any[]): Promise<T[]> {
@@ -21,7 +28,9 @@ export async function queryDocs<T = any>(text: string, params?: any[]): Promise<
   return result.rows as T[];
 }
 
-export async function withTransactionDocs<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+export async function withTransactionDocs<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
   const client = await poolDocs.connect();
   try {
     await client.query("BEGIN");
