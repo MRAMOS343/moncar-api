@@ -2,14 +2,10 @@
 import { Router, Request, Response } from "express";
 import { query, withTransaction } from "../db";
 import { requireAuth } from "../middleware/requireAuth";
+import { clampLimit } from "../utils";
+import { logger } from "../logger";
 
 const router = Router();
-
-function clampLimit(raw: unknown, def = 100, max = 500) {
-  const n = Number(raw ?? def);
-  if (!Number.isFinite(n)) return def;
-  return Math.min(Math.max(Math.trunc(n), 1), max);
-}
 
 function parseCursorText(raw: unknown): string | null {
   const s = String(raw ?? "").trim();
@@ -24,7 +20,7 @@ function parseDecimal(raw: unknown): number | null {
 }
 
 function requireRoles(req: Request, res: Response, roles: string[]) {
-  const auth = (req as any).auth as { rol?: string; sub?: string } | undefined;
+  const auth = req.auth as { rol?: string; sub?: string } | undefined;
   const rol = auth?.rol ?? "";
   if (!roles.includes(rol)) {
     res.status(403).json({ ok: false, error: "FORBIDDEN" });
@@ -126,7 +122,7 @@ router.get("/inventario", requireAuth, async (req: Request, res: Response) => {
       next_cursor: hasNext ? { cursor_sku: last!.sku, cursor_almacen: last!.almacen } : null,
     });
   } catch (error) {
-    console.error("[GET /inventario] error:", error);
+    logger.error({ err: error }, "inventario.list.error");
     return res.status(500).json({ ok: false, error: "INVENTARIO_LIST_FAILED" });
   }
 });
@@ -212,7 +208,7 @@ router.post("/inventario/adjust", requireAuth, async (req: Request, res: Respons
       movimiento_id: result.movimiento_id,
     });
   } catch (error) {
-    console.error("[POST /inventario/adjust] error:", error);
+    logger.error({ err: error }, "inventario.adjust.error");
     return res.status(500).json({ ok: false, error: "INVENTARIO_ADJUST_FAILED" });
   }
 });

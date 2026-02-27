@@ -2,14 +2,10 @@
 import { Router, Request, Response } from "express";
 import { query, withTransaction } from "../db";
 import { requireAuth } from "../middleware/requireAuth";
+import { parsePagination, isNumericId, clampLimit } from "../utils";
+import { logger } from "../logger";
 
 const router = Router();
-
-function clampLimit(raw: unknown, def = 100, max = 200) {
-  const n = Number(raw ?? def);
-  if (!Number.isFinite(n)) return def;
-  return Math.min(Math.max(Math.trunc(n), 1), max);
-}
 
 function parseCursorBigint(raw: unknown): string {
   const s = String(raw ?? "").trim();
@@ -19,7 +15,7 @@ function parseCursorBigint(raw: unknown): string {
 }
 
 function requireRoles(req: Request, res: Response, roles: string[]) {
-  const auth = (req as any).auth as { rol?: string; sub?: string } | undefined;
+  const auth = req.auth as { rol?: string; sub?: string } | undefined;
   const rol = auth?.rol ?? "";
   if (!roles.includes(rol)) {
     res.status(403).json({ ok: false, error: "FORBIDDEN" });
@@ -30,9 +26,9 @@ function requireRoles(req: Request, res: Response, roles: string[]) {
 
 // Intenta convertir auth.sub a bigint (si tu usuarios.id fuera bigint). Si no, null.
 function getUserIdBigintOrNull(req: Request): string | null {
-  const auth = (req as any).auth as { sub?: string } | undefined;
+  const auth = req.auth as { sub?: string } | undefined;
   const sub = String(auth?.sub ?? "").trim();
-  return /^\d+$/.test(sub) ? sub : null;
+  return isNumericId(sub) ? sub : null;
 }
 
 /**
@@ -76,7 +72,7 @@ router.get(
       const next_cursor = rows.length === limit ? rows[rows.length - 1].id : null;
       return res.json({ ok: true, items: rows, next_cursor });
     } catch (err) {
-      console.error("[GET /tech-sheets] error", err);
+      logger.error({ err }, "techSheets.list.error");
       return res.status(500).json({ ok: false, error: "TECH_SHEETS_LIST_FAILED" });
     }
   }
@@ -155,7 +151,7 @@ router.get(
 
       return res.json({ ok: true, ficha, atributos, atributos_map });
     } catch (err) {
-      console.error("[GET /tech-sheets/:sku] error", err);
+      logger.error({ err }, "techSheets.detalle.error");
       return res.status(500).json({ ok: false, error: "TECH_SHEET_DETAIL_FAILED" });
     }
   }
@@ -215,7 +211,7 @@ router.patch(
 
       return res.json({ ok: true, ficha: rows[0] });
     } catch (err) {
-      console.error("[PATCH /tech-sheets/:sku] error", err);
+      logger.error({ err }, "techSheets.upsert.error");
       return res.status(500).json({ ok: false, error: "TECH_SHEET_UPSERT_FAILED" });
     }
   }
@@ -286,7 +282,7 @@ router.post(
 
       return res.json({ ok: true, ...result });
     } catch (err) {
-      console.error("[POST /tech-sheets/:sku/attributes] error", err);
+      logger.error({ err }, "techSheets.attribute.upsert.error");
       return res.status(500).json({ ok: false, error: "TECH_SHEET_ATTRIBUTE_UPSERT_FAILED" });
     }
   }
@@ -362,7 +358,7 @@ router.put(
 
       return res.json({ ok: true, ...out });
     } catch (err) {
-      console.error("[PUT /tech-sheets/:sku/attributes] error", err);
+      logger.error({ err }, "techSheets.attributes.bulk.error");
       return res.status(500).json({ ok: false, error: "TECH_SHEET_ATTRIBUTES_BULK_FAILED" });
     }
   }
@@ -404,7 +400,7 @@ router.delete(
 
       return res.json({ ok: true, deleted_id: deleted[0].id });
     } catch (err) {
-      console.error("[DELETE /tech-sheets/:sku/attributes/:id] error", err);
+      logger.error({ err }, "techSheets.attribute.delete.error");
       return res.status(500).json({ ok: false, error: "TECH_SHEET_ATTRIBUTE_DELETE_FAILED" });
     }
   }

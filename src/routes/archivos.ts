@@ -15,6 +15,7 @@ import {
 } from "../storage/spaces";
 
 import { ArchivoInitSchema, ParteUrlSchema, CompletarSchema } from "../schemas/archivos";
+import { asyncHandler } from "../utils";
 
 import {
   AbortMultipartUploadCommand,
@@ -45,17 +46,17 @@ const MIMES_PERMITIDOS = new Set([
 function getSucursalId(req: Request): string {
   // Tu repo usa req.user.sucursal_id en requireAuth.
   // Si estás en modo single-store, puedes forzar con FORCED_SUCURSAL_ID.
-  return (req as any).user?.sucursal_id ?? (process.env.FORCED_SUCURSAL_ID ?? "moncar");
+  return req.user?.sucursal_id ?? (process.env.FORCED_SUCURSAL_ID ?? "moncar");
 }
 
 function getUsuarioId(req: Request): string | null {
-  return (req as any).user?.id ?? null;
+  return req.user?.id ?? null;
 }
 
 /**
  * POST /archivos/init
  */
-router.post("/init", requireAuth, async (req: Request, res: Response) => {
+router.post("/init", requireAuth, asyncHandler(async (req: Request, res: Response) => {
   if (!archivosEnabled()) return res.status(503).json({ error: "ARCHIVOS_DESHABILITADOS" });
 
   const parsed = ArchivoInitSchema.safeParse(req.body);
@@ -140,12 +141,12 @@ router.post("/init", requireAuth, async (req: Request, res: Response) => {
     partes_totales: partesTotales,
     expires_in_seconds: SIGNED_URL_TTL_SECONDS,
   });
-});
+}));
 
 /**
  * POST /archivos/:archivo_id/parte-url
  */
-router.post("/:archivo_id/parte-url", requireAuth, async (req: Request, res: Response) => {
+router.post("/:archivo_id/parte-url", requireAuth, asyncHandler(async (req: Request, res: Response) => {
   if (!archivosEnabled()) return res.status(503).json({ error: "ARCHIVOS_DESHABILITADOS" });
 
   const parsed = ParteUrlSchema.safeParse(req.body);
@@ -177,12 +178,12 @@ router.post("/:archivo_id/parte-url", requireAuth, async (req: Request, res: Res
 
   const url = await getSignedUrl(s3, cmd, { expiresIn: SIGNED_URL_TTL_SECONDS });
   return res.json({ url });
-});
+}));
 
 /**
  * POST /archivos/:archivo_id/completar
  */
-router.post("/:archivo_id/completar", requireAuth, async (req: Request, res: Response) => {
+router.post("/:archivo_id/completar", requireAuth, asyncHandler(async (req: Request, res: Response) => {
   if (!archivosEnabled()) return res.status(503).json({ error: "ARCHIVOS_DESHABILITADOS" });
 
   const parsed = CompletarSchema.safeParse(req.body);
@@ -249,12 +250,12 @@ router.post("/:archivo_id/completar", requireAuth, async (req: Request, res: Res
   );
 
   return res.json({ ok: true, tamanio_bytes: actualSize });
-});
+}));
 
 /**
  * GET /archivos
  */
-router.get("/", requireAuth, async (req: Request, res: Response) => {
+router.get("/", requireAuth, asyncHandler(async (req: Request, res: Response) => {
   if (!archivosEnabled()) return res.status(503).json({ error: "ARCHIVOS_DESHABILITADOS" });
 
   const sucursalId = getSucursalId(req);
@@ -272,12 +273,12 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
   );
 
   return res.json({ items });
-});
+}));
 
 /**
  * GET /archivos/:archivo_id/descargar
  */
-router.get("/:archivo_id/descargar", requireAuth, async (req: Request, res: Response) => {
+router.get("/:archivo_id/descargar", requireAuth, asyncHandler(async (req: Request, res: Response) => {
   if (!archivosEnabled()) return res.status(503).json({ error: "ARCHIVOS_DESHABILITADOS" });
 
   const sucursalId = getSucursalId(req);
@@ -304,12 +305,12 @@ router.get("/:archivo_id/descargar", requireAuth, async (req: Request, res: Resp
 
   const url = await getSignedUrl(s3, cmd, { expiresIn: SIGNED_URL_TTL_SECONDS });
   return res.json({ url, expires_in_seconds: SIGNED_URL_TTL_SECONDS });
-});
+}));
 
 /**
  * DELETE /archivos/:archivo_id
  */
-router.delete("/:archivo_id", requireAuth, async (req: Request, res: Response) => {
+router.delete("/:archivo_id", requireAuth, asyncHandler(async (req: Request, res: Response) => {
   if (!archivosEnabled()) return res.status(503).json({ error: "ARCHIVOS_DESHABILITADOS" });
 
   const sucursalId = getSucursalId(req);
@@ -350,7 +351,7 @@ router.delete("/:archivo_id", requireAuth, async (req: Request, res: Response) =
   }
 
   return res.json({ ok: true });
-});
+}));
 
 export default router;
 

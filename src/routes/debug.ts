@@ -7,7 +7,7 @@ const router = express.Router();
 router.get('/debug/whoami', requireAuth, (req, res) => {
   return res.json({
     ok: true,
-    user: (req as any).user,
+    user: req.user,
   });
 });
 

@@ -1,6 +1,8 @@
 // src/routes/health.ts
 import { Router } from "express";
-import { query } from "../db";
+import { query, pool } from "../db";
+import { queryDocs, poolDocs } from "../dbDocs";
+import { logger } from "../logger";
 
 const router = Router();
 
@@ -32,7 +34,7 @@ router.get("/readiness", async (_req, res) => {
       duration_ms: duracionMs,
     });
   } catch (error) {
-    console.error("[/readiness] Error al consultar la base:", error);
+    logger.error({ err: error }, "readiness.db.error");
     return res.status(503).json({
       ok: false,
       status: "unready",
@@ -58,13 +60,64 @@ router.get("/health/db", async (_req, res) => {
       duration_ms: duracionMs,
     });
   } catch (error) {
-    console.error("[/health/db] Error al consultar la base:", error);
+    logger.error({ err: error }, "health.db.error");
     return res.status(500).json({
       ok: false,
       db: "down",
       error: "No se pudo consultar la base de datos",
     });
   }
+});
+
+/**
+ * Health check completo: verifica ambas DBs y métricas del pool.
+ */
+router.get("/health/full", async (_req, res) => {
+  const start = Date.now();
+  const checks: Record<string, { status: string; latency_ms?: number; error?: string }> = {};
+
+  // Check main DB
+  try {
+    const dbStart = Date.now();
+    await query("SELECT 1");
+    checks.db_main = { status: "up", latency_ms: Date.now() - dbStart };
+  } catch (err) {
+    checks.db_main = { status: "down", error: err instanceof Error ? err.message : "unknown" };
+  }
+
+  // Check docs DB
+  try {
+    const docsStart = Date.now();
+    await queryDocs("SELECT 1");
+    checks.db_docs = { status: "up", latency_ms: Date.now() - docsStart };
+  } catch (err) {
+    checks.db_docs = { status: "down", error: err instanceof Error ? err.message : "unknown" };
+  }
+
+  // Pool metrics
+  const poolMetrics = {
+    main: {
+      total: pool.totalCount,
+      idle: pool.idleCount,
+      waiting: pool.waitingCount,
+    },
+    docs: {
+      total: poolDocs.totalCount,
+      idle: poolDocs.idleCount,
+      waiting: poolDocs.waitingCount,
+    },
+  };
+
+  const allUp = Object.values(checks).every((c) => c.status === "up");
+
+  return res.status(allUp ? 200 : 503).json({
+    ok: allUp,
+    status: allUp ? "healthy" : "degraded",
+    checks,
+    pools: poolMetrics,
+    uptime_s: Math.floor(process.uptime()),
+    total_latency_ms: Date.now() - start,
+  });
 });
 
 /**
@@ -116,7 +169,7 @@ router.get("/debug/db-info", async (_req, res) => {
       },
     });
   } catch (error) {
-    console.error("[/debug/db-info] error:", error);
+    logger.error({ err: error }, "debug.db-info.error");
     return res.status(500).json({
       ok: false,
       error: "DB_INFO_FAILED",

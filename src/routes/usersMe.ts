@@ -3,6 +3,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { query } from "../db";
 import { requireAuth } from "../middleware/requireAuth";
+import { asyncHandler } from "../utils";
 
 const router = Router();
 
@@ -23,7 +24,7 @@ function asUserId(req: any): string {
   return String(req.user?.id ?? "").trim();
 }
 
-router.get("/users/me/preferences", requireAuth, async (req, res) => {
+router.get("/users/me/preferences", requireAuth, asyncHandler(async (req, res) => {
   const usuarioId = asUserId(req);
   if (!usuarioId) return res.status(401).json({ ok: false, reason: "NO_AUTH" });
 
@@ -43,9 +44,9 @@ router.get("/users/me/preferences", requireAuth, async (req, res) => {
   );
 
   return res.json({ ok: true, item: rows[0] ?? null });
-});
+}));
 
-router.patch("/users/me/preferences", requireAuth, async (req, res) => {
+router.patch("/users/me/preferences", requireAuth, asyncHandler(async (req, res) => {
   const usuarioId = asUserId(req);
   const parsed = PreferencesPatchSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -53,7 +54,8 @@ router.patch("/users/me/preferences", requireAuth, async (req, res) => {
   }
 
   const patch = parsed.data;
-  const keys = Object.keys(patch) as Array<keyof typeof patch>;
+  const ALLOWED_PREF_COLS = new Set(["notif_stock_bajo", "notif_nuevas_ventas", "notif_nuevos_proveedores", "notif_reportes_diarios"]);
+  const keys = (Object.keys(patch) as Array<keyof typeof patch>).filter(k => ALLOWED_PREF_COLS.has(k));
   if (keys.length === 0) return res.json({ ok: true, item: null });
 
   await query(
@@ -84,9 +86,9 @@ router.patch("/users/me/preferences", requireAuth, async (req, res) => {
   );
 
   return res.json({ ok: true, item: rows[0] ?? null });
-});
+}));
 
-router.patch("/users/me/profile", requireAuth, async (req, res) => {
+router.patch("/users/me/profile", requireAuth, asyncHandler(async (req, res) => {
   const usuarioId = asUserId(req);
   const parsed = ProfilePatchSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -94,7 +96,8 @@ router.patch("/users/me/profile", requireAuth, async (req, res) => {
   }
 
   const patch = parsed.data;
-  const keys = Object.keys(patch) as Array<keyof typeof patch>;
+  const ALLOWED_PROFILE_COLS = new Set(["nombre", "telefono", "avatar_url"]);
+  const keys = (Object.keys(patch) as Array<keyof typeof patch>).filter(k => ALLOWED_PROFILE_COLS.has(k));
   if (keys.length === 0) return res.json({ ok: true, item: null });
 
   const sets: string[] = [];
@@ -121,6 +124,6 @@ router.patch("/users/me/profile", requireAuth, async (req, res) => {
   }
 
   return res.json({ ok: true, item: rows[0] });
-});
+}));
 
 export default router;

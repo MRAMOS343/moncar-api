@@ -2,18 +2,9 @@
 import { Router, Request, Response } from "express";
 import { query } from "../db";
 import { requireAuth } from "../middleware/requireAuth";
+import { parsePagination, parseQ } from "../utils";
 
 const router = Router();
-
-function clampLimit(raw: unknown, def = 50, max = 200) {
-  const n = Number(raw ?? def);
-  if (!Number.isFinite(n)) return def;
-  return Math.min(Math.max(Math.trunc(n), 1), max);
-}
-
-function parseQ(raw: unknown): string {
-  return String(raw ?? "").trim();
-}
 
 type Role = "admin" | "gerente" | "cajero" | "user";
 
@@ -22,10 +13,7 @@ type Role = "admin" | "gerente" | "cajero" | "user";
  * Soporta ambos shapes (req.user / req.auth) por compat con tu historial de auth.
  */
 async function getUserContext(req: Request): Promise<{ userId: string; role: Role; sucursalIdText: string | null }> {
-  const u = (req as any).user ?? {};
-  const a = (req as any).auth ?? {};
-
-  const userId = String(u.id ?? a.sub ?? "").trim();
+  const userId = String(req.user?.id ?? req.auth?.sub ?? "").trim();
   if (!userId) return { userId: "", role: "user", sucursalIdText: null };
 
   // Fuente de verdad: tabla usuarios (rol y sucursal)
@@ -67,7 +55,7 @@ router.get("/usuarios", requireAuth, async (req: Request, res: Response) => {
     return res.status(403).json({ ok: false, reason: "FORBIDDEN" });
   }
 
-  const limit = clampLimit(req.query.limit, 50, 200);
+  const { limit } = parsePagination(req.query as any, { defaultLimit: 50, maxLimit: 200 });
   const q = parseQ(req.query.q);
 
   const where: string[] = [];

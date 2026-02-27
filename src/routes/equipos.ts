@@ -3,16 +3,13 @@ import { Router, Request, Response, NextFunction } from "express";
 import { query } from "../db";
 import { requireAuth } from "../middleware/requireAuth";
 import { AddMiembroSchema, CreateEquipoSchema, UpdateEquipoSchema } from "../schemas/equipos";
+import { HttpError, asyncHandler, parsePagination, parseQ, isUuidLike, clampLimit } from "../utils";
+import { config } from "../config";
+import { logger } from "../logger";
 
 const router = Router();
 
 type Role = "admin" | "gerente" | "cajero" | "user";
-
-function clampLimit(raw: unknown, def = 50, max = 200) {
-  const n = Number(raw ?? def);
-  if (!Number.isFinite(n)) return def;
-  return Math.min(Math.max(Math.trunc(n), 1), max);
-}
 
 function parseCursorBigint(raw: unknown): string {
   const s = String(raw ?? "").trim();
@@ -21,34 +18,9 @@ function parseCursorBigint(raw: unknown): string {
   return s;
 }
 
-function parseQ(raw: unknown): string {
-  return String(raw ?? "").trim();
-}
-
-function isUuidLike(s: string): boolean {
-  return /^[0-9a-fA-F-]{36}$/.test(String(s ?? "").trim());
-}
-
-class HttpError extends Error {
-  status: number;
-  code: string;
-  constructor(status: number, code: string, message?: string) {
-    super(message ?? code);
-    this.status = status;
-    this.code = code;
-  }
-}
-
-function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    fn(req, res, next).catch(next);
-  };
-}
-
 function getReqUserId(req: Request): string {
-  const u = (req as any).user ?? {};
   // Soporta múltiples shapes (por tu historia de "dos auth")
-  const id = u.id ?? u.sub ?? u.userId ?? u.id_usuario ?? "";
+  const id = req.user?.id ?? req.user?.sub ?? req.user?.userId ?? req.user?.id_usuario ?? "";
   return String(id ?? "").trim();
 }
 
@@ -859,7 +831,7 @@ router.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   if (status === 404) return res.status(404).json({ ok: false, reason: code });
 
   // Log en servidor (para ver el error real)
-  console.error("[equipos] INTERNAL_ERROR:", err);
+  logger.error({ err }, "equipos.internal_error");
 
   return res.status(500).json({ ok: false, reason: "INTERNAL_ERROR" });
 });

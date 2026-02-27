@@ -30,34 +30,60 @@ export const LineaVentaSchema = z
 
     // si tu extractor ya lo trae:
     usu_fecha: z.string().optional().nullable(),
+
+    // ── Aliases from POS / alternate extractors ──
+    precio_unitario: z.number().optional().nullable(),
+    descuento: z.number().optional().nullable(),
+    impuesto_linea: z.number().optional().nullable(),
+    importe: z.number().optional().nullable(),
+    almacen_id: NullishTrimmed.optional(),
+    observ_origen: NullishTrimmed.optional(),
+    usuario_origen: NullishTrimmed.optional(),
+    usu_hora: NullishTrimmed.optional(),
+    id_salida_origen: z.number().int().optional().nullable(),
+    estado_linea: NullishTrimmed.optional(),
   })
   .passthrough();
 
-export const VentaSchema = z.object({
-  id_venta: z.number().int(),
-  fecha_emision: z.string().min(1),
+export const VentaSchema = z
+  .object({
+    id_venta: z.number().int(),
+    fecha_emision: z.string().min(1),
 
-  subtotal: z.number(),
-  impuestos: z.number(),
-  total: z.number(),
+    subtotal: z.number(),
+    impuestos: z.number(),
+    total: z.number(),
 
-  sucursal: NullishTrimmed.optional(),
-  caja: NullishTrimmed.optional(),
-  serie: NullishTrimmed.optional(),
-  folio: NullishTrimmed.optional(),
+    sucursal: NullishTrimmed.optional(),
+    caja: NullishTrimmed.optional(),
+    serie: NullishTrimmed.optional(),
+    folio: NullishTrimmed.optional(),
 
-  // Campos origen POS
-  cliente_origen: NullishTrimmed.optional(),
-  datos_origen: NullishTrimmed.optional(),
-  estado_origen: NullishTrimmed.optional(),
-  usu_fecha: z.string().optional().nullable(),
-  usu_hora: NullishTrimmed.optional(),
-  no_referencia: NullishTrimmed.optional(),
+    // Campos origen POS
+    cliente_origen: NullishTrimmed.optional(),
+    datos_origen: NullishTrimmed.optional(),
+    estado_origen: NullishTrimmed.optional(),
+    usu_fecha: z.string().optional().nullable(),
+    usu_hora: NullishTrimmed.optional(),
+    no_referencia: NullishTrimmed.optional(),
 
-  pagos: z.array(PagoSchema),
-  lineas: z.array(LineaVentaSchema),
+    pagos: z.array(PagoSchema),
+    lineas: z.array(LineaVentaSchema),
 
-  origen: NullishTrimmed.optional(),
-});
+    origen: NullishTrimmed.optional(),
+
+    // ── Aliases from POS / alternate extractors ──
+    impuesto: z.number().optional().nullable(),
+    caja_id: NullishTrimmed.optional(),
+    serie_documento: NullishTrimmed.optional(),
+    serieDocumento: NullishTrimmed.optional(),
+    folio_numero: NullishTrimmed.optional(),
+    folioNumero: NullishTrimmed.optional(),
+    NO_REFEREN: NullishTrimmed.optional(),
+    estado: NullishTrimmed.optional(),
+    cliente: NullishTrimmed.optional(),
+    datos: NullishTrimmed.optional(),
+  })
+  .passthrough();
 
 export const BatchVentasSchema = z.array(VentaSchema);

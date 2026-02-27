@@ -4,6 +4,7 @@ import { z } from "zod";
 import { query } from "../db";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
+import { asyncHandler } from "../utils";
 
 const router = Router();
 
@@ -21,19 +22,20 @@ const InventoryPatchSchema = z.object({
   formato_sku: z.string().trim().min(1).max(50).optional(),
 }).strict();
 
-router.get("/settings/company", requireAuth, requireRole(["admin", "gerente"]), async (_req, res) => {
+router.get("/settings/company", requireAuth, requireRole(["admin", "gerente"]), asyncHandler(async (_req, res) => {
   const rows = await query(`SELECT * FROM company_settings WHERE id = 1`);
   return res.json({ ok: true, item: rows[0] ?? null });
-});
+}));
 
-router.patch("/settings/company", requireAuth, requireRole(["admin", "gerente"]), async (req, res) => {
+router.patch("/settings/company", requireAuth, requireRole(["admin", "gerente"]), asyncHandler(async (req, res) => {
   const parsed = CompanyPatchSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ ok: false, reason: "VALIDATION_ERROR", issues: parsed.error.issues });
   }
 
   const patch = parsed.data;
-  const keys = Object.keys(patch) as Array<keyof typeof patch>;
+  const ALLOWED_COMPANY_COLS = new Set(["nombre_empresa", "rfc", "direccion", "telefono", "logo_url"]);
+  const keys = (Object.keys(patch) as Array<keyof typeof patch>).filter(k => ALLOWED_COMPANY_COLS.has(k));
   if (keys.length === 0) return res.json({ ok: true, item: null });
 
   const sets: string[] = [];
@@ -56,21 +58,22 @@ router.patch("/settings/company", requireAuth, requireRole(["admin", "gerente"])
   );
 
   return res.json({ ok: true, item: rows[0] ?? null });
-});
+}));
 
-router.get("/settings/inventory", requireAuth, requireRole(["admin", "gerente"]), async (_req, res) => {
+router.get("/settings/inventory", requireAuth, requireRole(["admin", "gerente"]), asyncHandler(async (_req, res) => {
   const rows = await query(`SELECT * FROM inventory_settings WHERE id = 1`);
   return res.json({ ok: true, item: rows[0] ?? null });
-});
+}));
 
-router.patch("/settings/inventory", requireAuth, requireRole(["admin", "gerente"]), async (req, res) => {
+router.patch("/settings/inventory", requireAuth, requireRole(["admin", "gerente"]), asyncHandler(async (req, res) => {
   const parsed = InventoryPatchSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ ok: false, reason: "VALIDATION_ERROR", issues: parsed.error.issues });
   }
 
   const patch = parsed.data;
-  const keys = Object.keys(patch) as Array<keyof typeof patch>;
+  const ALLOWED_INVENTORY_COLS = new Set(["stock_minimo_global", "alertas_activas", "formato_sku"]);
+  const keys = (Object.keys(patch) as Array<keyof typeof patch>).filter(k => ALLOWED_INVENTORY_COLS.has(k));
   if (keys.length === 0) return res.json({ ok: true, item: null });
 
   const sets: string[] = [];
@@ -93,6 +96,6 @@ router.patch("/settings/inventory", requireAuth, requireRole(["admin", "gerente"
   );
 
   return res.json({ ok: true, item: rows[0] ?? null });
-});
+}));
 
 export default router;

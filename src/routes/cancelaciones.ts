@@ -5,6 +5,8 @@ import { pool, withTransaction } from "../db";
 import { BatchCancelacionesSchema } from "../schemas/cancelaciones";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireAnyRole } from "../middleware/requireAnyRole";
+import { logger } from "../logger";
+import { asyncHandler } from "../utils";
 
 const router = Router();
 
@@ -18,7 +20,7 @@ router.post(
   ["/cancelaciones/import-batch", "/cancellations/import-batch"],
   requireAuth,
   requireAnyRole(["admin", "sync"]),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const parseResult = BatchCancelacionesSchema.safeParse(req.body);
     if (!parseResult.success) {
       return res.status(400).json({
@@ -126,10 +128,7 @@ router.post(
         errorCount++;
         const reason = e instanceof Error ? e.message : "Error desconocido";
         errors.push({ id_cancelacion_origen: c.id_cancelacion_origen, reason });
-        console.error("[cancelaciones.import-batch] error", {
-          id_cancelacion_origen: c.id_cancelacion_origen,
-          reason,
-        });
+        logger.error({ id_cancelacion_origen: c.id_cancelacion_origen, reason }, "cancelaciones.import-batch.procesando");
       }
     }
 
@@ -142,7 +141,7 @@ router.post(
         [batchId, sourceId, items.length, okCount, dupCount, errorCount, JSON.stringify(errors)]
       );
     } catch (e) {
-      console.error("[cancelaciones.import-batch] import_log failed", e);
+      logger.error({ err: e }, "cancelaciones.import-batch.import_log");
     }
 
     return res.json({
@@ -153,7 +152,7 @@ router.post(
       errors,
       max_id_cancelacion: maxCancelId,
     });
-  }
+  })
 );
 
 export default router;

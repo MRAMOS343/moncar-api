@@ -4,13 +4,14 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireAnyRole } from "../middleware/requireAnyRole";
 import { queryDocs as query } from "../dbDocs";
 import { RutaCreateSchema, RutaPatchSchema } from "../schemas/vehiculos";
+import { asyncHandler } from "../utils";
 
 const router = Router();
 
 // Admin-only
 router.use(requireAuth, requireAnyRole(["admin"]));
 
-router.get("/rutas", async (_req: Request, res: Response) => {
+router.get("/rutas", asyncHandler(async (_req: Request, res: Response) => {
   const rows = await query<{
     ruta_id: string;
     nombre: string;
@@ -37,9 +38,9 @@ router.get("/rutas", async (_req: Request, res: Response) => {
   );
 
   return res.json({ items: rows });
-});
+}));
 
-router.post("/rutas", async (req: Request, res: Response) => {
+router.post("/rutas", asyncHandler(async (req: Request, res: Response) => {
   const parsed = RutaCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: "BAD_REQUEST", details: parsed.error.flatten() });
 
@@ -55,9 +56,9 @@ router.post("/rutas", async (req: Request, res: Response) => {
   );
 
   return res.status(201).json({ ok: true, ruta_id: row.ruta_id });
-});
+}));
 
-router.patch("/rutas/:ruta_id", async (req: Request, res: Response) => {
+router.patch("/rutas/:ruta_id", asyncHandler(async (req: Request, res: Response) => {
   const rutaId = req.params.ruta_id;
 
   const parsed = RutaPatchSchema.safeParse(req.body);
@@ -89,9 +90,9 @@ router.patch("/rutas/:ruta_id", async (req: Request, res: Response) => {
 
   if (updated.length === 0) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   return res.json({ ok: true });
-});
+}));
 
-router.delete("/rutas/:ruta_id", async (req: Request, res: Response) => {
+router.delete("/rutas/:ruta_id", asyncHandler(async (req: Request, res: Response) => {
   const rutaId = req.params.ruta_id;
 
   const [{ cnt }] = await query<{ cnt: number }>(
@@ -114,6 +115,6 @@ router.delete("/rutas/:ruta_id", async (req: Request, res: Response) => {
 
   if (deleted.length === 0) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   return res.json({ ok: true });
-});
+}));
 
 export default router;

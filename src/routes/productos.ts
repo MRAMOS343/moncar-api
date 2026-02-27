@@ -2,14 +2,10 @@
 import { Router, Request, Response } from "express";
 import { query } from "../db";
 import { requireAuth } from "../middleware/requireAuth";
+import { clampLimit } from "../utils";
+import { logger } from "../logger";
 
 const router = Router();
-
-function clampLimit(raw: unknown, def = 100, max = 200) {
-  const n = Number(raw ?? def);
-  if (!Number.isFinite(n)) return def;
-  return Math.min(Math.max(Math.trunc(n), 1), max);
-}
 
 function parseCursorSku(raw: unknown): string {
   return String(raw ?? "").trim();
@@ -30,7 +26,7 @@ function parseIntOrNull(raw: unknown): number | null {
 }
 
 function requireRoles(req: Request, res: Response, roles: string[]) {
-  const auth = (req as any).auth as { rol?: string; sub?: string } | undefined;
+  const auth = req.auth as { rol?: string; sub?: string } | undefined;
   const rol = auth?.rol ?? "";
   if (!roles.includes(rol)) {
     res.status(403).json({ ok: false, error: "FORBIDDEN" });
@@ -181,7 +177,7 @@ router.get(
         mode: q ? "search" : "cursor",
       });
     } catch (err) {
-      console.error("[GET /products] error", err);
+      logger.error({ err }, "productos.list.error");
       return res.status(500).json({ ok: false, error: "PRODUCTS_LIST_FAILED" });
     }
   }
@@ -203,7 +199,7 @@ router.get(
 
       return res.json({ ok: true, item });
     } catch (err) {
-      console.error("[GET /products/:sku] error", err);
+      logger.error({ err }, "productos.detalle.error");
       return res.status(500).json({ ok: false, error: "PRODUCT_DETAIL_FAILED" });
     }
   }
@@ -338,7 +334,7 @@ router.patch(
 
       return res.json({ ok: true, item: after });
     } catch (err) {
-      console.error("[PATCH /products/:sku] error", err);
+      logger.error({ err }, "productos.update.error");
       return res.status(500).json({ ok: false, error: "PRODUCT_UPDATE_FAILED" });
     }
   }

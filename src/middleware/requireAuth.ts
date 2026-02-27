@@ -35,10 +35,10 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     if (!decoded.correo && decoded.email) decoded.correo = decoded.email;
 
     // ✅ Estándar actual del repo
-    (req as any).auth = decoded;
+    req.auth = decoded;
 
     // ✅ Compat con rutas que esperan req.user
-    (req as any).user = {
+    req.user = {
       id: String(decoded.sub),
       role: String(decoded.rol ?? "user"),
       sucursal_id: decoded.sucursal_id ?? null,

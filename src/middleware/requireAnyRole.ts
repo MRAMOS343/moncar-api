@@ -6,7 +6,7 @@ export type UserRole = "admin" | "gerente" | "cajero" | "sync";
 
 export function requireAnyRole(allowed: UserRole[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const auth = (req as any).auth as { rol?: string } | undefined;
+    const auth = req.auth as { rol?: string } | undefined;
     const rol = String(auth?.rol ?? "").trim() as UserRole | "";
 
     // Si aquí prefieres 403 por consistencia, cambia 401->403.
@@ -18,8 +18,6 @@ export function requireAnyRole(allowed: UserRole[]) {
       return res.status(403).json({
         ok: false,
         error: "FORBIDDEN_ROLE",
-        allowed,
-        got: rol,
       });
     }
 

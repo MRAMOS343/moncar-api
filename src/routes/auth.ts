@@ -4,6 +4,7 @@ import * as jwt from "jsonwebtoken";
 import type { Secret, SignOptions } from "jsonwebtoken";
 import { requireAuth } from "../middleware/requireAuth";
 import { query } from "../db";
+import { logger } from "../logger";
 
 const router = Router();
 
@@ -173,7 +174,7 @@ router.post("/auth/login", async (req, res) => {
       must_change_password: !!u.must_change_password,
     });
   } catch (err) {
-    console.error("[auth.login] error", err);
+    logger.error({ err }, "auth.login.error");
     return res.status(500).json({ ok: false, error: "SERVER_ERROR" });
   }
 });
@@ -185,7 +186,7 @@ router.post("/auth/login", async (req, res) => {
  */
 router.get("/auth/me", requireAuth, async (req, res) => {
   try {
-    const auth = (req as any).auth as { sub: string };
+    const auth = req.auth as { sub: string };
 
     const rows = await query(
       `
@@ -232,7 +233,7 @@ router.get("/auth/me", requireAuth, async (req, res) => {
 
     return res.json({ user, must_change_password: !!u.must_change_password });
   } catch (err) {
-    console.error("[auth.me] error", err);
+    logger.error({ err }, "auth.me.error");
     return res.status(500).json({ ok: false, error: "SERVER_ERROR" });
   }
 });

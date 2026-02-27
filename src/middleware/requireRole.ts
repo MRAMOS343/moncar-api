@@ -7,7 +7,7 @@ import { UserRole } from "./requireAnyRole";
  */
 export function requireRole(allowed: UserRole[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const role = (req as any)?.user?.role as UserRole | undefined;
+    const role = req.user?.role as UserRole | undefined;
     if (!role) return res.status(401).json({ ok: false, reason: "NO_AUTH" });
     if (!allowed.includes(role)) {
       return res.status(403).json({ ok: false, reason: "FORBIDDEN" });

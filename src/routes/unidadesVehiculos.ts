@@ -11,6 +11,7 @@ import {
   AlertaUpsertSchema,
   PorVencerQuerySchema,
 } from "../schemas/vehiculos";
+import { asyncHandler } from "../utils";
 
 const router = Router();
 router.use(requireAuth, requireAnyRole(["admin"]));
@@ -18,7 +19,7 @@ router.use(requireAuth, requireAnyRole(["admin"]));
 /**
  * GET /vehiculos/rutas/:ruta_id/unidades
  */
-router.get("/rutas/:ruta_id/unidades", async (req: Request, res: Response) => {
+router.get("/rutas/:ruta_id/unidades", asyncHandler(async (req: Request, res: Response) => {
   const rutaId = req.params.ruta_id;
 
   const rows = await query(
@@ -34,12 +35,12 @@ router.get("/rutas/:ruta_id/unidades", async (req: Request, res: Response) => {
   );
 
   return res.json({ items: rows });
-});
+}));
 
 /**
  * POST /vehiculos/rutas/:ruta_id/unidades
  */
-router.post("/rutas/:ruta_id/unidades", async (req: Request, res: Response) => {
+router.post("/rutas/:ruta_id/unidades", asyncHandler(async (req: Request, res: Response) => {
   const rutaId = req.params.ruta_id;
 
   const parsed = UnidadCreateSchema.safeParse(req.body);
@@ -61,12 +62,12 @@ router.post("/rutas/:ruta_id/unidades", async (req: Request, res: Response) => {
   );
 
   return res.status(201).json({ ok: true, unidad_id: row.unidad_id });
-});
+}));
 
 /**
  * GET /vehiculos/unidades/:unidad_id
  */
-router.get("/unidades/:unidad_id", async (req: Request, res: Response) => {
+router.get("/unidades/:unidad_id", asyncHandler(async (req: Request, res: Response) => {
   const unidadId = req.params.unidad_id;
 
   const rows = await query(
@@ -83,12 +84,12 @@ router.get("/unidades/:unidad_id", async (req: Request, res: Response) => {
 
   if (rows.length === 0) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   return res.json({ item: rows[0] });
-});
+}));
 
 /**
  * PATCH /vehiculos/unidades/:unidad_id
  */
-router.patch("/unidades/:unidad_id", async (req: Request, res: Response) => {
+router.patch("/unidades/:unidad_id", asyncHandler(async (req: Request, res: Response) => {
   const unidadId = req.params.unidad_id;
 
   const parsed = UnidadPatchSchema.safeParse(req.body);
@@ -96,12 +97,19 @@ router.patch("/unidades/:unidad_id", async (req: Request, res: Response) => {
 
   const patch = parsed.data;
 
+  // Column whitelist — must match DB columns exactly
+  const ALLOWED_COLUMNS = new Set([
+    "numero", "placa", "marca", "modelo", "anio",
+    "color", "km", "estado", "descripcion",
+  ]);
+
   const sets: string[] = [];
   const params: any[] = [];
   let idx = 1;
 
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
+    if (!ALLOWED_COLUMNS.has(k)) continue;
     sets.push(`${k} = $${idx++}`);
     params.push(v);
   }
@@ -117,12 +125,12 @@ router.patch("/unidades/:unidad_id", async (req: Request, res: Response) => {
 
   if (updated.length === 0) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   return res.json({ ok: true });
-});
+}));
 
 /**
  * DELETE /vehiculos/unidades/:unidad_id
  */
-router.delete("/unidades/:unidad_id", async (req: Request, res: Response) => {
+router.delete("/unidades/:unidad_id", asyncHandler(async (req: Request, res: Response) => {
   const unidadId = req.params.unidad_id;
 
   const deleted = await query<{ unidad_id: string }>(
@@ -132,13 +140,13 @@ router.delete("/unidades/:unidad_id", async (req: Request, res: Response) => {
 
   if (deleted.length === 0) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   return res.json({ ok: true });
-});
+}));
 
 /**
  * GET /vehiculos/unidades/:unidad_id/documentos
  * Devuelve documentos + un snapshot básico del archivo (nombre, mime, tamaño).
  */
-router.get("/unidades/:unidad_id/documentos", async (req: Request, res: Response) => {
+router.get("/unidades/:unidad_id/documentos", asyncHandler(async (req: Request, res: Response) => {
   const unidadId = req.params.unidad_id;
 
   const rows = await query(
@@ -167,13 +175,13 @@ router.get("/unidades/:unidad_id/documentos", async (req: Request, res: Response
   );
 
   return res.json({ items: rows });
-});
+}));
 
 /**
  * POST /vehiculos/unidades/:unidad_id/documentos
  * Crea documento apuntando a un archivo_id ya subido.
  */
-router.post("/unidades/:unidad_id/documentos", async (req: Request, res: Response) => {
+router.post("/unidades/:unidad_id/documentos", asyncHandler(async (req: Request, res: Response) => {
   const unidadId = req.params.unidad_id;
 
   const parsed = DocumentoUnidadCreateSchema.safeParse(req.body);
@@ -211,12 +219,12 @@ router.post("/unidades/:unidad_id/documentos", async (req: Request, res: Respons
   );
 
   return res.status(201).json({ ok: true, documento_id: row.documento_id });
-});
+}));
 
 /**
  * PATCH /vehiculos/documentos/:documento_id
  */
-router.patch("/documentos/:documento_id", async (req: Request, res: Response) => {
+router.patch("/documentos/:documento_id", asyncHandler(async (req: Request, res: Response) => {
   const documentoId = req.params.documento_id;
 
   const parsed = DocumentoUnidadPatchSchema.safeParse(req.body);
@@ -224,12 +232,18 @@ router.patch("/documentos/:documento_id", async (req: Request, res: Response) =>
 
   const patch = parsed.data;
 
+  // Column whitelist — must match DB columns exactly
+  const ALLOWED_DOC_COLUMNS = new Set([
+    "tipo", "nombre", "notas", "fecha_documento", "vigencia_hasta",
+  ]);
+
   const sets: string[] = [];
   const params: any[] = [];
   let idx = 1;
 
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
+    if (!ALLOWED_DOC_COLUMNS.has(k)) continue;
     sets.push(`${k} = $${idx++}`);
     params.push(v);
   }
@@ -251,13 +265,13 @@ router.patch("/documentos/:documento_id", async (req: Request, res: Response) =>
 
   if (updated.length === 0) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   return res.json({ ok: true });
-});
+}));
 
 /**
  * DELETE /vehiculos/documentos/:documento_id
  * Soft delete
  */
-router.delete("/documentos/:documento_id", async (req: Request, res: Response) => {
+router.delete("/documentos/:documento_id", asyncHandler(async (req: Request, res: Response) => {
   const documentoId = req.params.documento_id;
 
   const updated = await query(
@@ -273,12 +287,12 @@ router.delete("/documentos/:documento_id", async (req: Request, res: Response) =
 
   if (updated.length === 0) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   return res.json({ ok: true });
-});
+}));
 
 /**
  * GET /vehiculos/unidades/:unidad_id/alertas
  */
-router.get("/unidades/:unidad_id/alertas", async (req: Request, res: Response) => {
+router.get("/unidades/:unidad_id/alertas", asyncHandler(async (req: Request, res: Response) => {
   const unidadId = req.params.unidad_id;
 
   const rows = await query(
@@ -292,13 +306,13 @@ router.get("/unidades/:unidad_id/alertas", async (req: Request, res: Response) =
   );
 
   return res.json({ items: rows });
-});
+}));
 
 /**
  * PUT /vehiculos/unidades/:unidad_id/alertas/:tipo_documento
  * Upsert por (unidad_id, tipo_documento)
  */
-router.put("/unidades/:unidad_id/alertas/:tipo_documento", async (req: Request, res: Response) => {
+router.put("/unidades/:unidad_id/alertas/:tipo_documento", asyncHandler(async (req: Request, res: Response) => {
   const unidadId = req.params.unidad_id;
   const tipo = req.params.tipo_documento;
 
@@ -323,13 +337,13 @@ router.put("/unidades/:unidad_id/alertas/:tipo_documento", async (req: Request, 
   );
 
   return res.json({ ok: true, alerta_id: rows[0].alerta_id });
-});
+}));
 
 /**
  * GET /vehiculos/documentos/por-vencer?dias=30
  * Usa la view v_docs_por_vencer
  */
-router.get("/documentos/por-vencer", async (req: Request, res: Response) => {
+router.get("/documentos/por-vencer", asyncHandler(async (req: Request, res: Response) => {
   const parsed = PorVencerQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ ok: false, error: "BAD_QUERY" });
 
@@ -347,6 +361,6 @@ router.get("/documentos/por-vencer", async (req: Request, res: Response) => {
   );
 
   return res.json({ items: rows, dias });
-});
+}));
 
 export default router;

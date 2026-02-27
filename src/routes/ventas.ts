@@ -5,6 +5,7 @@ import { pool, withTransaction, query } from "../db";
 import { BatchVentasSchema } from "../schemas/ventas";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireAnyRole } from "../middleware/requireAnyRole";
+import { logger } from "../logger";
 
 const router = Router();
 
@@ -63,8 +64,8 @@ router.post(
   requireAuth,
   requireAnyRole(["admin", "sync"]),
   async (req: Request, res: Response) => {
-    console.log("[import-batch] sample keys:", Object.keys(req.body?.[0] ?? {}));
-    console.log("[import-batch] sample header:", {
+    logger.debug({ keys: Object.keys(req.body?.[0] ?? {}) }, "import-batch.sample_keys");
+    logger.debug({
       id_venta: req.body?.[0]?.id_venta,
       cliente_origen: req.body?.[0]?.cliente_origen,
       datos_origen: req.body?.[0]?.datos_origen,
@@ -75,7 +76,7 @@ router.post(
       caja: req.body?.[0]?.caja,
       serie: req.body?.[0]?.serie,
       folio: req.body?.[0]?.folio,
-    });
+    }, "import-batch.sample_header");
 
     const parseResult = BatchVentasSchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -111,41 +112,41 @@ router.post(
 
       // total = subtotal + impuesto (acordado). Si tu payload trae "total" distinto, seguimos lo acordado.
       const subtotal = Number(venta.subtotal ?? 0);
-      const impuesto = Number((venta as any).impuestos ?? (venta as any).impuesto ?? 0);
+      const impuesto = Number(venta.impuestos ?? venta.impuesto ?? 0);
       const total = subtotal + impuesto;
 
       // Mapeos robustos (compatibilidad)
-      const cajaVal = (venta as any).caja ?? (venta as any).caja_id ?? null;
+      const cajaVal = venta.caja ?? venta.caja_id ?? null;
 
       const serieVal =
-        (venta as any).serie ??
-        (venta as any).serie_documento ??
-        (venta as any).serieDocumento ??
+        venta.serie ??
+        venta.serie_documento ??
+        venta.serieDocumento ??
         null;
 
       const folioVal =
-        (venta as any).folio ??
-        (venta as any).folio_numero ??
-        (venta as any).folioNumero ??
-        (venta as any).no_referencia ??
-        (venta as any).NO_REFEREN ??
+        venta.folio ??
+        venta.folio_numero ??
+        venta.folioNumero ??
+        venta.no_referencia ??
+        venta.NO_REFEREN ??
         null;
 
-      const estadoVal = (venta as any).estado_origen ?? (venta as any).estado ?? null;
-      const clienteVal = (venta as any).cliente_origen ?? (venta as any).cliente ?? null;
-      const datosVal = (venta as any).datos_origen ?? (venta as any).datos ?? null;
-      const usuFechaVal = (venta as any).usu_fecha ?? null;
-      const usuHoraVal = (venta as any).usu_hora ?? null;
+      const estadoVal = venta.estado_origen ?? venta.estado ?? null;
+      const clienteVal = venta.cliente_origen ?? venta.cliente ?? null;
+      const datosVal = venta.datos_origen ?? venta.datos ?? null;
+      const usuFechaVal = venta.usu_fecha ?? null;
+      const usuHoraVal = venta.usu_hora ?? null;
 
       const noRefVal =
-        (venta as any).no_referencia ??
-        (venta as any).NO_REFEREN ??
-        (venta as any).folio ??
-        (venta as any).folio_numero ??
+        venta.no_referencia ??
+        venta.NO_REFEREN ??
+        venta.folio ??
+        venta.folio_numero ??
         null;
 
       // Log de mapeo (temporal, útil para confirmar que no se pierden)
-      console.log("[import-batch] mapped header:", {
+      logger.debug({
         id_venta: venta.id_venta,
         cajaVal,
         serieVal,
@@ -154,7 +155,7 @@ router.post(
         usuFechaVal,
         usuHoraVal,
         noRefVal,
-      });
+      }, "import-batch.mapped_header");
 
       try {
         await withTransaction(async (client) => {
@@ -225,29 +226,29 @@ router.post(
           for (const [idx, linea] of (venta.lineas ?? []).entries()) {
             const renglon = idx + 1;
 
-            const cantidad = Number((linea as any).cantidad ?? 0);
-            const precioUnitario = Number((linea as any).precio ?? (linea as any).precio_unitario ?? 0);
-            const descuento = Number((linea as any).descuento ?? 0);
+            const cantidad = Number(linea.cantidad ?? 0);
+            const precioUnitario = Number(linea.precio ?? linea.precio_unitario ?? 0);
+            const descuento = Number(linea.descuento ?? 0);
 
             // Persistimos el valor recibido (tasa o monto); después lo normalizas si quieres.
-            const impuestoLinea = Number((linea as any).impuesto ?? (linea as any).impuesto_linea ?? 0);
+            const impuestoLinea = Number(linea.impuesto ?? linea.impuesto_linea ?? 0);
 
             const importeLinea =
-              (linea as any).importe != null
-                ? Number((linea as any).importe)
+              linea.importe != null
+                ? Number(linea.importe)
                 : Number.isFinite(cantidad) && Number.isFinite(precioUnitario)
                 ? cantidad * precioUnitario - descuento
                 : 0;
 
-            const almacenId = (linea as any).almacen_id ?? (linea as any).almacen ?? null;
+            const almacenId = linea.almacen_id ?? linea.almacen ?? null;
 
-            const observOrigen = (linea as any).observ ?? (linea as any).observ_origen ?? null;
-            const usuarioOrigen = (linea as any).usuario ?? (linea as any).usuario_origen ?? null;
-            const lineaUsuHora = (linea as any).usuhora ?? (linea as any).usu_hora ?? null;
-            const lineaUsuFecha = (linea as any).usu_fecha ?? null;
+            const observOrigen = linea.observ ?? linea.observ_origen ?? null;
+            const usuarioOrigen = linea.usuario ?? linea.usuario_origen ?? null;
+            const lineaUsuHora = linea.usuhora ?? linea.usu_hora ?? null;
+            const lineaUsuFecha = linea.usu_fecha ?? null;
 
-            const idSalidaOrigen = (linea as any).id_salida ?? (linea as any).id_salida_origen ?? null;
-            const estadoLinea = (linea as any).estado ?? (linea as any).estado_linea ?? null;
+            const idSalidaOrigen = linea.id_salida ?? linea.id_salida_origen ?? null;
+            const estadoLinea = linea.estado ?? linea.estado_linea ?? null;
 
             await client.query(
               `
@@ -274,7 +275,7 @@ router.post(
               [
                 venta.id_venta,
                 renglon,
-                (linea as any).articulo,
+                linea.articulo,
                 cantidad,
                 precioUnitario,
                 descuento,
@@ -306,7 +307,7 @@ router.post(
                 $1,$2,$3,$4
               )
               `,
-              [venta.id_venta, Number((pago as any).idx), String((pago as any).metodo), Number((pago as any).monto)]
+              [venta.id_venta, Number(pago.idx), String(pago.metodo), Number(pago.monto)]
             );
           }
         });
@@ -316,7 +317,7 @@ router.post(
         errorCount++;
         const reason = e instanceof Error ? e.message : "Error desconocido";
         errorDetails.push({ id_venta: venta.id_venta, reason });
-        console.error("[ventas.import-batch] error procesando venta", { id_venta: venta.id_venta, reason });
+        logger.error({ id_venta: venta.id_venta, reason }, "ventas.import-batch.procesando");
       }
     }
 
@@ -339,7 +340,7 @@ router.post(
         [batchId, sourceId, ventas.length, okCount, dupCount, errorCount, JSON.stringify(errorDetails)]
       );
     } catch (e) {
-      console.error("[ventas.import-batch] error escribiendo import_log", e);
+      logger.error({ err: e }, "ventas.import-batch.import_log");
     }
 
     // estado_sincronizacion
@@ -360,7 +361,7 @@ router.post(
           [sourceId, maxIdVenta]
         );
       } catch (e) {
-        console.error("[ventas.import-batch] error actualizando estado_sincronizacion", e);
+        logger.error({ err: e }, "ventas.import-batch.estado_sincronizacion");
       }
     }
 
@@ -459,7 +460,7 @@ router.get(["/ventas", "/sales"], requireAuth, async (req: Request, res: Respons
         : null,
     });
   } catch (error) {
-    console.error("[GET /ventas] error:", error);
+    logger.error({ err: error }, "ventas.list.error");
     return res.status(500).json({ ok: false, error: "VENTAS_LIST_FAILED" });
   }
 });
@@ -597,7 +598,7 @@ router.get(["/ventas/:venta_id", "/sales/:venta_id"], requireAuth, async (req: R
 
     return res.json({ ok: true, venta, lineas, pagos });
   } catch (error) {
-    console.error("[GET /ventas/:venta_id] error:", error);
+    logger.error({ err: error }, "ventas.detalle.error");
     return res.status(500).json({ ok: false, error: "VENTA_DETALLE_FAILED" });
   }
 });

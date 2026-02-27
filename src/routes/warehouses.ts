@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { query } from "../db";
 import { requireAuth } from "../middleware/requireAuth";
+import { asyncHandler } from "../utils";
 
 const router = Router();
 
@@ -15,7 +16,7 @@ const router = Router();
  *  - /warehouses?activo=true|1         -> solo activas
  *  - /warehouses?activo=false|0        -> solo inactivas
  */
-router.get("/warehouses", requireAuth, async (req, res) => {
+router.get("/warehouses", requireAuth, asyncHandler(async (req, res) => {
   // Parse robusto del query param "activo" (si existe)
   const activoRaw = req.query.activo;
   let activoFilter: boolean | undefined = undefined;
@@ -75,6 +76,6 @@ router.get("/warehouses", requireAuth, async (req, res) => {
   }
 
   return res.json(rows);
-});
+}));
 
 export default router;
