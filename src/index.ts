@@ -73,6 +73,7 @@ app.use(apiLimiter);
 const v1 = Router();
 
 // POS
+v1.use(salesReportRouter);  // antes de ventasRouter para evitar colisión con /sales/:venta_id
 v1.use(ventasRouter);
 v1.use(healthRouter);
 v1.use(inventarioRouter);
@@ -88,7 +89,6 @@ v1.use(settingsRouter);
 v1.use(usersMeRouter);
 v1.use(invitacionesRouter);
 v1.use(testEmailRouter);
-v1.use(salesReportRouter);
 
 // RENTAS
 
