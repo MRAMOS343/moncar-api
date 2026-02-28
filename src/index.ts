@@ -17,6 +17,9 @@ import usuariosRouter from "./routes/usuarios";
 import settingsRouter from "./routes/settings";
 import usersMeRouter from "./routes/usersMe";
 import debugRouter from "./routes/debug";
+import invitacionesRouter from "./routes/invitaciones";
+import testEmailRouter from "./routes/testEmail";
+import salesReportRouter from "./routes/salesReport";
 
 import { logger } from "./logger";
 import { authLimiter, apiLimiter } from "./middleware/rateLimiter";
@@ -46,7 +49,12 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true); // curl/postman sin Origin
-      if (allowedOrigins.includes(origin)) return cb(null, true);
+      const allowed = allowedOrigins.some(o =>
+        o.includes("*")
+          ? new RegExp("^" + o.replace(/\*/g, ".*") + "$").test(origin)
+          : o === origin
+      );
+      if (allowed) return cb(null, true);
       return cb(new Error("Not allowed by CORS"));
     },
     credentials: true,
@@ -78,6 +86,9 @@ v1.use(equiposRouter);
 v1.use(usuariosRouter);
 v1.use(settingsRouter);
 v1.use(usersMeRouter);
+v1.use(invitacionesRouter);
+v1.use(testEmailRouter);
+v1.use(salesReportRouter);
 
 // RENTAS
 

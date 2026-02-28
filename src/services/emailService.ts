@@ -1,9 +1,6 @@
 // src/services/emailService.ts
-import { Resend } from "resend";
+import { sendEmail } from "./mailer";
 import { logger } from "../logger";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM = process.env.EMAIL_FROM ?? "no-reply@tudominio.com";
 
 export const emailService = {
   async sendInvitation({
@@ -16,8 +13,7 @@ export const emailService = {
     inviteUrl: string;
   }) {
     try {
-      await resend.emails.send({
-        from: FROM,
+      await sendEmail({
         to,
         subject: "Tu invitación a Moncar POS",
         html: `
@@ -37,6 +33,7 @@ export const emailService = {
             </p>
           </div>
         `,
+        tags: [{ name: "type", value: "invitation" }],
       });
       logger.info({ to }, "email.invitation.sent");
     } catch (err) {
