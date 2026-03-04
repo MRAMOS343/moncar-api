@@ -82,3 +82,34 @@ export const AlertaUpsertSchema = z.object({
 export const PorVencerQuerySchema = z.object({
   dias: z.coerce.number().int().min(0).max(365).default(30),
 });
+
+// ── Bulk Import Schemas ──────────────────────────────────────────────
+
+export const DocumentoBulkSchema = z.object({
+  archivo_id:       z.string().uuid(),
+  tipo:             z.enum([
+    "cromatica",
+    "factura",
+    "poliza_seguro",
+    "tarjeta_circulacion",
+    "titulo_concesion",
+    "verificacion",
+    "permiso",
+    "otro",
+  ]),
+  nombre:           z.string().min(1).max(200),
+  vigencia_hasta:   z.string().date().optional().nullable(),   // YYYY-MM-DD
+});
+
+export const UnidadBulkSchema = z.object({
+  numero:     z.string().min(1).max(20),
+  placa:      z.string().max(20).optional().nullable(),
+  marca:      z.string().max(60).optional().nullable(),
+  modelo:     z.string().max(60).optional().nullable(),
+  documentos: z.array(DocumentoBulkSchema),
+});
+
+export const ImportarRutaSchema = z.object({
+  unidades:          z.array(UnidadBulkSchema).min(1).max(50),
+  omitir_duplicados: z.boolean().default(true),
+});

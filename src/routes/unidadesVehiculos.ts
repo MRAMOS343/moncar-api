@@ -10,8 +10,11 @@ import {
   DocumentoUnidadPatchSchema,
   AlertaUpsertSchema,
   PorVencerQuerySchema,
+  ImportarRutaSchema,
 } from "../schemas/vehiculos";
-import { asyncHandler } from "../utils";
+import { asyncHandler, HttpError } from "../utils";
+import { withTransactionDocs } from "../dbDocs";
+import { logger } from "../logger";
 
 const router = Router();
 router.use(requireAuth, requireAnyRole(["admin"]));
@@ -337,6 +340,158 @@ router.put("/unidades/:unidad_id/alertas/:tipo_documento", asyncHandler(async (r
   );
 
   return res.json({ ok: true, alerta_id: rows[0].alerta_id });
+}));
+
+// ── Bulk Import Endpoints ─────────────────────────────────────────────
+
+/**
+ * GET /vehiculos/rutas/:ruta_id/unidades/check?numeros=07,15,16
+ * Verifica cuáles de los números de unidad ya existen en la ruta.
+ */
+router.get("/rutas/:ruta_id/unidades/check", asyncHandler(async (req: Request, res: Response) => {
+  const rutaId = req.params.ruta_id;
+  const numeros = String(req.query.numeros ?? "")
+    .split(",")
+    .map(n => n.trim())
+    .filter(Boolean);
+
+  if (numeros.length === 0) {
+    return res.json({ ok: true, duplicados: [] });
+  }
+
+  const rows = await query<{ numero: string }>(
+    `SELECT numero FROM unidades
+     WHERE ruta_id = $1 AND numero = ANY($2)`,
+    [rutaId, numeros]
+  );
+
+  return res.json({
+    ok: true,
+    duplicados: rows.map(r => r.numero),
+  });
+}));
+
+/**
+ * POST /vehiculos/rutas/:ruta_id/importar
+ * Importación masiva: crea unidades + asocia documentos ya subidos, en una sola transacción.
+ *
+ * Body: { unidades: [{ numero, placa?, marca?, modelo?, documentos: [{ archivo_id, tipo, nombre, vigencia_hasta? }] }],
+ *         omitir_duplicados?: boolean }
+ */
+router.post("/rutas/:ruta_id/importar", asyncHandler(async (req: Request, res: Response) => {
+  const rutaId = req.params.ruta_id;
+
+  // Verificar que la ruta existe
+  const ruta = await query(`SELECT ruta_id FROM rutas WHERE ruta_id = $1`, [rutaId]);
+  if (ruta.length === 0) throw new HttpError(404, "RUTA_NOT_FOUND");
+
+  // Validar body
+  const parsed = ImportarRutaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ ok: false, error: "VALIDATION_ERROR", details: parsed.error.flatten() });
+  }
+
+  const { unidades, omitir_duplicados } = parsed.data;
+
+  const resultado = {
+    creadas:  [] as string[],
+    omitidas: [] as string[],
+    errores:  [] as { numero: string; error: string }[],
+  };
+
+  await withTransactionDocs(async (client) => {
+    for (const unidad of unidades) {
+      // ¿Ya existe esta unidad en esta ruta?
+      const { rows: existentes } = await client.query(
+        "SELECT unidad_id FROM unidades WHERE ruta_id = $1 AND numero = $2",
+        [rutaId, unidad.numero]
+      );
+
+      if (existentes.length > 0) {
+        if (omitir_duplicados) {
+          resultado.omitidas.push(unidad.numero);
+          continue;
+        } else {
+          throw new HttpError(409, `UNIDAD_DUPLICADA:${unidad.numero}`);
+        }
+      }
+
+      // SAVEPOINT para poder recuperarnos si falla el INSERT sin romper la transacción
+      const sp = `sp_unidad_${unidad.numero.replace(/\W/g, "_")}`;
+      await client.query(`SAVEPOINT ${sp}`);
+
+      // Crear la unidad
+      let unidadId: string;
+      try {
+        const { rows } = await client.query(
+          `INSERT INTO unidades
+             (ruta_id, numero, placa, marca, modelo, estado, descripcion)
+           VALUES ($1, $2, $3, $4, $5, 'activa', '')
+           RETURNING unidad_id`,
+          [
+            rutaId,
+            unidad.numero,
+            unidad.placa ?? "",
+            unidad.marca ?? "",
+            unidad.modelo ?? "",
+          ]
+        );
+        unidadId = rows[0].unidad_id;
+      } catch (err) {
+        // En PG, tras un error el tx queda "aborted" — ROLLBACK TO SAVEPOINT lo restaura
+        await client.query(`ROLLBACK TO SAVEPOINT ${sp}`);
+        resultado.errores.push({ numero: unidad.numero, error: "Error creando la unidad" });
+        continue;
+      }
+
+      // Asociar cada documento ya subido a esta unidad
+      for (const doc of unidad.documentos) {
+        // Verificar que el archivo_id existe
+        const { rows: archivoRows } = await client.query(
+          "SELECT archivo_id FROM archivos WHERE archivo_id = $1 AND eliminado_en IS NULL",
+          [doc.archivo_id]
+        );
+
+        if (archivoRows.length === 0) {
+          resultado.errores.push({
+            numero: unidad.numero,
+            error: `archivo_id ${doc.archivo_id} no encontrado`,
+          });
+          continue;
+        }
+
+        await client.query(
+          `INSERT INTO documentos_unidad
+             (unidad_id, tipo, nombre, notas, fecha_documento, vigencia_hasta, archivo_id)
+           VALUES ($1, $2, $3, '', NULL, $4, $5)`,
+          [
+            unidadId,
+            doc.tipo,
+            doc.nombre,
+            doc.vigencia_hasta ?? null,
+            doc.archivo_id,
+          ]
+        );
+      }
+
+      // Liberar savepoint si todo fue bien
+      await client.query(`RELEASE SAVEPOINT ${sp}`);
+      resultado.creadas.push(unidad.numero);
+    }
+  });
+
+  logger.info({
+    rutaId,
+    creadas:  resultado.creadas.length,
+    omitidas: resultado.omitidas.length,
+    errores:  resultado.errores.length,
+  }, "vehiculos.bulk_import.done");
+
+  return res.status(201).json({
+    ok: true,
+    ...resultado,
+    resumen: `${resultado.creadas.length} unidades creadas, ${resultado.omitidas.length} omitidas, ${resultado.errores.length} errores`,
+  });
 }));
 
 /**
