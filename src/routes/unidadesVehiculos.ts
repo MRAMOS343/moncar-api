@@ -420,13 +420,13 @@ router.post("/rutas/:ruta_id/importar", asyncHandler(async (req: Request, res: R
       const sp = `sp_unidad_${unidad.numero.replace(/\W/g, "_")}`;
       await client.query(`SAVEPOINT ${sp}`);
 
-      // Crear la unidad
+      // Crear la unidad (mismas columnas que el endpoint individual POST /rutas/:ruta_id/unidades)
       let unidadId: string;
       try {
         const { rows } = await client.query(
           `INSERT INTO unidades
-             (ruta_id, numero, placa, marca, modelo, estado, descripcion)
-           VALUES ($1, $2, $3, $4, $5, 'activa', '')
+             (ruta_id, numero, placa, marca, modelo, anio, color, km, estado, descripcion)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'activa', '')
            RETURNING unidad_id`,
           [
             rutaId,
@@ -434,13 +434,18 @@ router.post("/rutas/:ruta_id/importar", asyncHandler(async (req: Request, res: R
             unidad.placa ?? "",
             unidad.marca ?? "",
             unidad.modelo ?? "",
+            null,  // anio
+            "",    // color
+            0,     // km
           ]
         );
         unidadId = rows[0].unidad_id;
-      } catch (err) {
+      } catch (err: any) {
         // En PG, tras un error el tx queda "aborted" — ROLLBACK TO SAVEPOINT lo restaura
         await client.query(`ROLLBACK TO SAVEPOINT ${sp}`);
-        resultado.errores.push({ numero: unidad.numero, error: "Error creando la unidad" });
+        const pgMsg = err?.message ?? "desconocido";
+        logger.warn({ numero: unidad.numero, pgError: pgMsg }, "vehiculos.bulk_import.insert_failed");
+        resultado.errores.push({ numero: unidad.numero, error: `Error creando la unidad: ${pgMsg}` });
         continue;
       }
 
