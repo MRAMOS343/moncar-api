@@ -431,7 +431,7 @@ router.post("/rutas/:ruta_id/importar", asyncHandler(async (req: Request, res: R
           [
             rutaId,
             unidad.numero,
-            unidad.placa ?? "",
+            unidad.placa || null,  // NULL para no violar UNIQUE constraint con strings vacíos
             unidad.marca ?? "",
             unidad.modelo ?? "",
             null,  // anio
