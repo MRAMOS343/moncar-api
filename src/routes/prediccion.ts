@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 import { asyncHandler, HttpError } from "../utils/http";
 import { recalcularPredicciones } from "../jobs/prediccionJob";
+import { logger } from "../logger";
 
 const router = Router();
 
