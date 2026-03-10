@@ -6,7 +6,7 @@ import { calcularPrediccion, calcularMAE, calcularMAPE } from "../utils/predicci
 const HORIZONTE_SEMANAS = 8;
 
 export function startPrediccionJob() {
-  cron.schedule("0 3 * * 0", async () => {
+  cron.schedule("40 18 * * 1", async () => {
     logger.info("prediccion.job.iniciando");
     try {
       const resultado = await recalcularPredicciones();
@@ -14,9 +14,11 @@ export function startPrediccionJob() {
     } catch (err) {
       logger.error({ err }, "prediccion.job.error");
     }
+  }, {
+    timezone: "America/Mexico_City"
   });
 
-  logger.info("prediccion.job.registrado (domingos 3am)");
+  logger.info("prediccion.job.registrado (lunes 18:40 CDMX)");
 }
 
 export async function recalcularPredicciones(): Promise<{
