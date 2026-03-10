@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import { logger } from "../logger";
 import { query, withTransaction } from "../db";
 import { logger } from "../logger";
 import { calcularPrediccion, calcularMAE, calcularMAPE } from "../utils/prediccion";
