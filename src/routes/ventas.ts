@@ -6,6 +6,7 @@ import { BatchVentasSchema } from "../schemas/ventas";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireAnyRole } from "../middleware/requireAnyRole";
 import { logger } from "../logger";
+import { cacheInvalidate } from "../utils/dbCache";
 
 const router = Router();
 
@@ -363,6 +364,15 @@ router.post(
       } catch (e) {
         logger.error({ err: e }, "ventas.import-batch.estado_sincronizacion");
       }
+    }
+
+    if (okCount > 0) {
+      await Promise.all([
+        cacheInvalidate("kpis:"),
+        cacheInvalidate("tendencia:"),
+        cacheInvalidate("metodos_pago:"),
+        cacheInvalidate("top_productos:"),
+      ]);
     }
 
     return res.json({ ok: okCount, dup: dupCount, error: errorCount, batch_id: batchId, errors: errorDetails });

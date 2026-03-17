@@ -23,10 +23,12 @@ import salesReportRouter from "./routes/salesReport";
 import prediccionRouter from "./routes/prediccion";
 import compraSugeridaRouter from "./routes/compraSugerida";
 import prediccionDiariaRouter from "./routes/prediccionDiaria";
+import dashboardRouter from "./routes/dashboard";
 
 import { startPrediccionJob } from "./jobs/prediccionJob";
 import { startCompraSugeridaJob } from "./jobs/compraSugeridaJob";
 import { startPrediccionDiariaJob } from "./jobs/prediccionDiariaJob";
+import { startCacheJob } from "./jobs/cacheJob";
 import { logger } from "./logger";
 import { authLimiter, apiLimiter } from "./middleware/rateLimiter";
 import { errorHandler } from "./middleware/errorHandler";
@@ -98,6 +100,7 @@ v1.use(testEmailRouter);
 v1.use(prediccionRouter);
 v1.use(compraSugeridaRouter);
 v1.use(prediccionDiariaRouter);
+v1.use(dashboardRouter);
 
 // RENTAS
 
@@ -146,6 +149,7 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 startPrediccionJob();
 startCompraSugeridaJob();
 startPrediccionDiariaJob();
+startCacheJob();
 
 const server = app.listen(PORT, () => {
   logger.info({ port: PORT }, "server.started");

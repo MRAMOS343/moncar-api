@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { pool, withTransaction, query } from "../db";
 import { logger } from "../logger";
 import { config } from "../config";
+import { cacheInvalidate } from "../utils/dbCache";
 
 export interface VentaInput {
   id_venta: number;
@@ -106,6 +107,15 @@ export class VentasService {
     // Actualizar estado de sincronización
     if (maxIdVenta > 0) {
       await this.actualizarEstadoSync(maxIdVenta);
+    }
+
+    if (okCount > 0) {
+      await Promise.all([
+        cacheInvalidate("kpis:"),
+        cacheInvalidate("tendencia:"),
+        cacheInvalidate("metodos_pago:"),
+        cacheInvalidate("top_productos:"),
+      ]);
     }
 
     return { ok: okCount, dup: dupCount, error: errorCount, batch_id: batchId, errors: errorDetails, max_id_venta: maxIdVenta };
