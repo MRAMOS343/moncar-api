@@ -136,17 +136,20 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
     // Q1: Detalle de ventas
     const ventasRows = await query<{
       folio_numero: string; usu_fecha: string; usu_hora: string;
-      sucursal_id: string; estado_origen: string; pagos_resumen: string;
+      sucursal_id: string; estado_origen: string; pagos_metodo_resumen: string; pagos_total_resumen: string;
       subtotal: number; impuesto: number; total: number; cancelada: boolean;
     }>(
       `SELECT
          v.folio_numero, v.usu_fecha, v.usu_hora, v.sucursal_id, v.estado_origen,
-         COALESCE(pr.pagos_resumen, '') AS pagos_resumen,
+         COALESCE(pr.pagos_metodo_resumen, '') AS pagos_metodo_resumen,
+         COALESCE(pr.pagos_total_resumen, '') AS pagos_total_resumen,
          v.subtotal::numeric AS subtotal, v.impuesto::numeric AS impuesto,
          v.total::numeric AS total, COALESCE(v.cancelada, false) AS cancelada
        FROM ventas v
        LEFT JOIN LATERAL (
-         SELECT string_agg(x.metodo || ':' || trim(to_char(x.monto, 'FM999999990.00')), ', ' ORDER BY x.metodo) AS pagos_resumen
+         SELECT
+           string_agg(x.metodo, ', ' ORDER BY x.metodo) AS pagos_metodo_resumen,
+           string_agg(trim(to_char(x.monto, 'FM999999990.00')), ', ' ORDER BY x.metodo) AS pagos_total_resumen
          FROM (SELECT metodo, SUM(monto) AS monto FROM pagos_venta WHERE venta_id = v.venta_id GROUP BY metodo) x
        ) pr ON true
        WHERE v.usu_fecha >= $1 AND v.usu_fecha <= $2 ${sucursalFilter}
@@ -908,7 +911,8 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
       { header: "Hora",      key: "hora",     width: 10 },
       { header: "Sucursal",  key: "sucursal", width: 14 },
       { header: "Estado",    key: "estado",   width: 14 },
-      { header: "Pagos",     key: "pagos",    width: 24 },
+      { header: "Método Pago", key: "metodo_pago", width: 24 },
+      { header: "Total Pago",  key: "total_pago",  width: 16 },
       { header: "Subtotal",  key: "subtotal", width: 14 },
       { header: "IVA",       key: "iva",      width: 14 },
       { header: "Total",     key: "total",    width: 14 },
@@ -935,7 +939,8 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
         hora:     v.usu_hora ? v.usu_hora.substring(0, 5) : "",
         sucursal: v.sucursal_id ?? "",
         estado:   estadoLabel,
-        pagos:    v.pagos_resumen ?? "",
+        metodo_pago: v.pagos_metodo_resumen ?? "",
+        total_pago:  v.pagos_total_resumen ?? "",
         subtotal: Number(v.subtotal),
         iva:      Number(v.impuesto),
         total:    Number(v.total),
@@ -958,9 +963,9 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
     const lastDataRow = ws5.lastRow!.number;
     const totalesRow = ws5.addRow({
       folio:    "TOTAL",
-      subtotal: { formula: `SUM(G2:G${lastDataRow})` },
-      iva:      { formula: `SUM(H2:H${lastDataRow})` },
-      total:    { formula: `SUM(I2:I${lastDataRow})` },
+      subtotal: { formula: `SUM(H2:H${lastDataRow})` },
+      iva:      { formula: `SUM(I2:I${lastDataRow})` },
+      total:    { formula: `SUM(J2:J${lastDataRow})` },
     });
     totalesRow.eachCell(cell => {
       cell.font = { bold: true, color: { argb: `FF${WHITE}` } };
@@ -973,7 +978,7 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
 
     ws5.autoFilter = {
       from: { row: 1, column: 1 },
-      to:   { row: 1, column: 10 },
+      to:   { row: 1, column: 11 },
     };
 
     // ── Enviar response ──────────────────────────────────────────────────
