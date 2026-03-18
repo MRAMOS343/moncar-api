@@ -42,12 +42,13 @@ router.get(
       ventas_canceladas: string;
     }>(
       `SELECT
-         COALESCE(SUM(CASE WHEN cancelada = false THEN total END), 0)::numeric AS ventas_totales,
-         COUNT(CASE WHEN cancelada = false THEN 1 END)::integer                AS num_transacciones,
-         COALESCE(AVG(CASE WHEN cancelada = false THEN total END), 0)::numeric AS ticket_promedio,
-         COUNT(CASE WHEN cancelada = true THEN 1 END)::integer                 AS ventas_canceladas
+         COALESCE(SUM(total), 0)::numeric AS ventas_totales,
+         COUNT(*)::integer                AS num_transacciones,
+         COALESCE(AVG(total), 0)::numeric AS ticket_promedio,
+         0::integer                       AS ventas_canceladas
        FROM ventas
        WHERE usu_fecha BETWEEN $1 AND $2
+         AND estado_origen = 'CO'
          ${sf}`,
       params
     );
@@ -89,7 +90,7 @@ router.get(
        FROM ventas
        WHERE
          usu_fecha >= CURRENT_DATE - ($1 * INTERVAL '1 day')
-         AND cancelada = false
+         AND estado_origen = 'CO'
          ${sf}
        GROUP BY usu_fecha
        ORDER BY usu_fecha ASC`,
@@ -135,7 +136,7 @@ router.get(
        JOIN ventas v ON v.venta_id = p.venta_id
        WHERE
          v.usu_fecha BETWEEN $1 AND $2
-         AND v.cancelada = false
+         AND v.estado_origen = 'CO'
          ${sf}
        GROUP BY p.metodo
        ORDER BY total DESC`,
@@ -183,7 +184,7 @@ router.get(
        LEFT JOIN productos p ON p.sku = lv.articulo
        WHERE
          v.usu_fecha BETWEEN $1 AND $2
-         AND v.cancelada = false
+         AND v.estado_origen = 'CO'
          AND lv.articulo IS NOT NULL
          ${sf}
        GROUP BY lv.articulo, p.descrip, p.marca
