@@ -160,7 +160,9 @@ router.get(
           AND (
             $2 = '' OR
             sku ILIKE ('%' || $2 || '%') OR
-            descrip ILIKE ('%' || $2 || '%')
+            descrip ILIKE ('%' || $2 || '%') OR
+            marca ILIKE ('%' || $2 || '%') OR
+            notes ILIKE ('%' || $2 || '%')
           )
         ORDER BY sku ASC
         LIMIT $3
