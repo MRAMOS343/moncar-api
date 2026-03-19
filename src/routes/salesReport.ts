@@ -176,12 +176,12 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
 
     // Q1: Detalle de ventas
     const ventasRows = await query<{
-      folio_numero: string; usu_fecha: string; usu_hora: string;
+      venta_id: number; folio_numero: string; usu_fecha: string; usu_hora: string;
       sucursal_id: string; estado_origen: string; pagos_metodo_resumen: string; pagos_total_resumen: string;
       subtotal: number; impuesto: number; total: number; cancelada: boolean;
     }>(
       `SELECT
-         v.folio_numero, v.usu_fecha, v.usu_hora, v.sucursal_id, v.estado_origen,
+         v.venta_id, v.folio_numero, v.usu_fecha, v.usu_hora, v.sucursal_id, v.estado_origen,
          COALESCE(pr.pagos_metodo_resumen, '') AS pagos_metodo_resumen,
          COALESCE(pr.pagos_total_resumen, '') AS pagos_total_resumen,
          v.subtotal::numeric AS subtotal, v.impuesto::numeric AS impuesto,
@@ -947,6 +947,7 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
     const ws5 = workbook.addWorksheet("Detalle", { views: [{ showGridLines: false }] });
 
     ws5.columns = [
+      { header: "Venta ID",  key: "venta_id",  width: 12 },
       { header: "Folio",     key: "folio",    width: 14 },
       { header: "Fecha",     key: "fecha",    width: 14 },
       { header: "Hora",      key: "hora",     width: 10 },
@@ -975,6 +976,7 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
         v.estado_origen === "CA" ? "Cancelada"  : (v.estado_origen ?? "");
 
       const dataRow = ws5.addRow({
+        venta_id: v.venta_id,
         folio:    v.folio_numero ?? "",
         fecha:    formatDate(v.usu_fecha),
         hora:     v.usu_hora ? v.usu_hora.substring(0, 5) : "",
@@ -1004,9 +1006,9 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
     const lastDataRow = ws5.lastRow!.number;
     const totalesRow = ws5.addRow({
       folio:    "TOTAL",
-      subtotal: { formula: `SUM(H2:H${lastDataRow})` },
-      iva:      { formula: `SUM(I2:I${lastDataRow})` },
-      total:    { formula: `SUM(J2:J${lastDataRow})` },
+      subtotal: { formula: `SUM(I2:I${lastDataRow})` },
+      iva:      { formula: `SUM(J2:J${lastDataRow})` },
+      total:    { formula: `SUM(K2:K${lastDataRow})` },
     });
     totalesRow.eachCell(cell => {
       cell.font = { bold: true, color: { argb: `FF${WHITE}` } };
@@ -1019,7 +1021,7 @@ router.get("/sales/report", requireAuth, async (req: Request, res: Response) => 
 
     ws5.autoFilter = {
       from: { row: 1, column: 1 },
-      to:   { row: 1, column: 11 },
+      to:   { row: 1, column: 12 },
     };
 
     // ── Enviar response ──────────────────────────────────────────────────
