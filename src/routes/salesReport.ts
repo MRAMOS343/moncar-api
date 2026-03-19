@@ -40,6 +40,11 @@ function formatMXN(n: number): string {
   return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n);
 }
 
+function getLastDayOfMonth(year: number, month: number): string {
+  const lastDay = new Date(Date.UTC(year, month, 0));
+  return lastDay.toISOString().split("T")[0];
+}
+
 function addSectionHeader(ws: ExcelJS.Worksheet, from: string, to: string, label: string) {
   ws.mergeCells(`${from}:${to}`);
   const cell = ws.getCell(from);
@@ -90,19 +95,55 @@ function addEmptyMessage(ws: ExcelJS.Worksheet, startRow: number, cols: number, 
 // GET /api/v1/sales/report
 router.get("/sales/report", requireAuth, async (req: Request, res: Response) => {
   try {
-    const { from, to, sucursal_id } = req.query as Record<string, string>;
+    const { from, to, month, sucursal_id } = req.query as Record<string, string>;
 
     // ── Validación ───────────────────────────────────────────────────────
-    if (!from) {
-      return res.status(400).json({ ok: false, error: "El parámetro 'from' es requerido" });
+    if (month && (from || to)) {
+      return res.status(400).json({
+        ok: false,
+        error: "Usa 'month' o el rango 'from/to', no ambos al mismo tiempo",
+      });
     }
+
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(from) || (to && !dateRegex.test(to))) {
+    const monthRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+    if (!month && !from) {
+      return res.status(400).json({
+        ok: false,
+        error: "Debes enviar 'month' (YYYY-MM) o 'from' (YYYY-MM-DD)",
+      });
+    }
+
+    if (month && !monthRegex.test(month)) {
+      return res.status(400).json({ ok: false, error: "Formato de mes inválido. Usar YYYY-MM" });
+    }
+
+    if (from && (!dateRegex.test(from) || (to && !dateRegex.test(to)))) {
       return res.status(400).json({ ok: false, error: "Formato de fecha inválido. Usar YYYY-MM-DD" });
     }
 
-    const fromDate = from;
-    const toDate   = to ?? new Date().toISOString().split("T")[0];
+    const today = new Date().toISOString().split("T")[0];
+    const currentMonth = today.slice(0, 7);
+
+    let fromDate: string;
+    let toDate: string;
+
+    if (month) {
+      const [yearStr, monthStr] = month.split("-");
+      const year = Number(yearStr);
+      const monthNum = Number(monthStr);
+
+      if (month > currentMonth) {
+        return res.status(400).json({ ok: false, error: "No se puede generar reporte para meses futuros" });
+      }
+
+      fromDate = `${month}-01`;
+      toDate = month === currentMonth ? today : getLastDayOfMonth(year, monthNum);
+    } else {
+      fromDate = from!;
+      toDate = to ?? today;
+    }
 
     // ── Calcular período anterior ────────────────────────────────────────
     const d1 = new Date(fromDate + "T00:00:00");
