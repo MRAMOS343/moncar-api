@@ -74,7 +74,7 @@ app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
 // Rate limiting
-app.use("/auth/login", authLimiter);
+app.use("/api/v1/auth/login", authLimiter);
 app.use(apiLimiter);
 
 // === API v1 Router ===
@@ -112,31 +112,6 @@ v1.use("/vehiculos", unidadesVehiculosRouter);
 // Montar v1 en /api/v1
 app.use("/api/v1", v1);
 
-// Compat: también montar en raíz (deprecar gradualmente)
-// Adds Deprecation header to signal clients should migrate to /api/v1
-app.use((_req, res, next) => {
-  res.setHeader("Deprecation", "true");
-  res.setHeader("Sunset", "2025-12-31");
-  res.setHeader("Link", '</api/v1>; rel="successor-version"');
-  next();
-});
-app.use(ventasRouter);
-app.use(healthRouter);
-app.use(inventarioRouter);
-app.use(debugRouter);
-app.use(fichasRouter);
-app.use(authRouter);
-app.use(warehousesRouter);
-app.use(productosRouter);
-app.use(cancelacionesRouter);
-app.use(equiposRouter);
-app.use(usuariosRouter);
-app.use(settingsRouter);
-app.use(usersMeRouter);
-app.use("/archivos", archivosRouter);
-app.use("/vehiculos", rutasVehiculosRouter);
-app.use("/vehiculos", unidadesVehiculosRouter);
-
 app.get("/ping", (_req, res) => {
   res.json({ ok: true, message: "pong", now: new Date().toISOString() });
 });
@@ -145,18 +120,27 @@ app.get("/ping", (_req, res) => {
 app.use(errorHandler);
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
+const isTestEnv = process.env.NODE_ENV === "test";
 
-startPrediccionJob();
-startCompraSugeridaJob();
-startPrediccionDiariaJob();
-startCacheJob();
+let server: ReturnType<typeof app.listen> | null = null;
 
-const server = app.listen(PORT, () => {
-  logger.info({ port: PORT }, "server.started");
-});
+if (!isTestEnv) {
+  startPrediccionJob();
+  startCompraSugeridaJob();
+  startPrediccionDiariaJob();
+  startCacheJob();
+
+  server = app.listen(PORT, () => {
+    logger.info({ port: PORT }, "server.started");
+  });
+}
 
 // === Graceful Shutdown ===
 async function gracefulShutdown(signal: string) {
+  if (!server) {
+    process.exit(0);
+  }
+
   logger.info({ signal }, "shutdown.initiated");
 
   server.close(async () => {

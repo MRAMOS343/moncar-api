@@ -8,6 +8,55 @@ import { recalcularPrediccionDiaria } from "../jobs/prediccionDiariaJob";
 
 const router = Router();
 
+type PrediccionSemanalRow = {
+  semana_inicio: string;
+  semana_fin: string;
+  monto_pred: string;
+  monto_real: string | null;
+  confianza: string | null;
+  tendencia: string | null;
+  calculado_en: string;
+};
+
+type HistorialSemanalDiaRow = {
+  semana_inicio: string;
+  semana_fin: string;
+  monto: string;
+  num_ventas: number;
+  dia_semana: number;
+};
+
+type MetricasPrediccionRow = {
+  mae: string | null;
+  mape: string | null;
+  dias_data: number | null;
+  calculado_en: string;
+};
+
+type PrediccionDiariaRow = {
+  fecha: string;
+  monto_pred: string;
+  monto_real: string | null;
+  tendencia: string | null;
+  confianza: string | null;
+  dia_semana: number;
+  calculado_en?: string;
+};
+
+type HistorialDiarioRow = {
+  fecha: string;
+  monto: string;
+  num_ventas: number;
+  dia_semana: number;
+};
+
+type SemanaRealRow = {
+  fecha: string;
+  monto_real: string;
+  num_ventas: number;
+  dia_semana: number;
+};
+
 // GET /api/v1/prediccion/diaria
 // vista = 'semanal' (default) | 'diaria'
 router.get("/prediccion/diaria", requireAuth,
@@ -29,7 +78,7 @@ router.get("/prediccion/diaria", requireAuth,
       const [prediccionesSem, historialSem, metricas] = await Promise.all([
 
         // Predicciones agrupadas por semana
-        query(
+        query<PrediccionSemanalRow>(
           `SELECT
              DATE_TRUNC('week', fecha)::date                        AS semana_inicio,
              (DATE_TRUNC('week', fecha) + INTERVAL '6 days')::date AS semana_fin,
@@ -49,7 +98,7 @@ router.get("/prediccion/diaria", requireAuth,
         ),
 
         // Historial de las últimas 16 semanas con detalle por día de semana
-        query(
+        query<HistorialSemanalDiaRow>(
           `SELECT
              DATE_TRUNC('week', usu_fecha)::date                        AS semana_inicio,
              (DATE_TRUNC('week', usu_fecha) + INTERVAL '6 days')::date AS semana_fin,
@@ -67,7 +116,7 @@ router.get("/prediccion/diaria", requireAuth,
         ),
 
         // Métricas (mismas para ambas vistas)
-        query(
+        query<MetricasPrediccionRow>(
           `SELECT mae, mape, dias_data, calculado_en
            FROM prediccion_diaria_metricas
            WHERE (sucursal_id = $1 OR ($1 IS NULL AND sucursal_id IS NULL))`,
@@ -77,8 +126,8 @@ router.get("/prediccion/diaria", requireAuth,
 
       // KPI: promedio semanal
       const semanasMapa = new Map<string, number>();
-      for (const row of historialSem as any[]) {
-        const key = String(row.semana_inicio);
+      for (const row of historialSem) {
+        const key = row.semana_inicio;
         semanasMapa.set(key, (semanasMapa.get(key) ?? 0) + Number(row.monto));
       }
       const montosPorSemana = Array.from(semanasMapa.values());
@@ -103,7 +152,7 @@ router.get("/prediccion/diaria", requireAuth,
       const promediosPorDia: Record<number, number[]> = {
         0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [],
       };
-      for (const row of historialSem as any[]) {
+      for (const row of historialSem) {
         const dia = Number(row.dia_semana);
         if (Number.isInteger(dia) && dia >= 0 && dia <= 6) {
           promediosPorDia[dia].push(Number(row.monto));
@@ -126,8 +175,11 @@ router.get("/prediccion/diaria", requireAuth,
         : null;
 
       // KPI: total predicho próximas N semanas
-      const totalPredProximas = (prediccionesSem as any[])
-        .reduce((acc: number, p: any) => acc + Number(p.monto_pred), 0);
+      const totalPredProximas = prediccionesSem
+        .reduce((acc, p) => acc + Number(p.monto_pred), 0);
+
+      const primeraPred = prediccionesSem[0];
+      const segundaPred = prediccionesSem[1];
 
       return res.json({
         ok: true,
@@ -144,13 +196,13 @@ router.get("/prediccion/diaria", requireAuth,
         // Detalle por día de semana (barras)
         promedio_por_dia: promediosDia,
 
-        metricas: (metricas as any[])[0] ?? null,
+        metricas: metricas[0] ?? null,
         sin_datos: prediccionesSem.length === 0,
-        calculado_en: (prediccionesSem as any[])[0]?.calculado_en ?? null,
+        calculado_en: primeraPred?.calculado_en ?? null,
         kpis: {
-          esta_semana: Number((prediccionesSem as any[])[0]?.monto_pred ?? 0),
-          proxima_semana: Number((prediccionesSem as any[])[1]?.monto_pred ?? 0),
-          tendencia: (prediccionesSem as any[])[0]?.tendencia ?? "estable",
+          esta_semana: Number(primeraPred?.monto_pred ?? 0),
+          proxima_semana: Number(segundaPred?.monto_pred ?? 0),
+          tendencia: primeraPred?.tendencia ?? "estable",
           cambio_pct: Math.round(cambioPct * 10) / 10,
           mejor_dia: mejorDia,
           peor_dia: peorDia,
@@ -163,7 +215,7 @@ router.get("/prediccion/diaria", requireAuth,
     // ── Vista DIARIA ─────────────────────────────────────────────────────────
     const [prediccionesDia, historialDia, metricas] = await Promise.all([
 
-      query(
+      query<PrediccionDiariaRow>(
         `SELECT
            fecha,
            monto_pred,
@@ -180,7 +232,7 @@ router.get("/prediccion/diaria", requireAuth,
         [limite, sucursal_id ?? null]
       ),
 
-      query(
+      query<HistorialDiarioRow>(
         `SELECT
            usu_fecha::text                         AS fecha,
            SUM(total)::numeric                    AS monto,
@@ -196,7 +248,7 @@ router.get("/prediccion/diaria", requireAuth,
         [sucursal_id ?? null]
       ),
 
-      query(
+      query<MetricasPrediccionRow>(
         `SELECT mae, mape, dias_data, calculado_en
          FROM prediccion_diaria_metricas
          WHERE (sucursal_id = $1 OR ($1 IS NULL AND sucursal_id IS NULL))`,
@@ -209,9 +261,9 @@ router.get("/prediccion/diaria", requireAuth,
       vista: "diaria",
       historial:    historialDia,
       predicciones: prediccionesDia,
-      metricas:     (metricas as any[])[0] ?? null,
+      metricas:     metricas[0] ?? null,
       sin_datos:    prediccionesDia.length === 0,
-      calculado_en: (prediccionesDia as any[])[0]?.calculado_en ?? null,
+      calculado_en: prediccionesDia[0]?.calculado_en ?? null,
     });
   })
 );
@@ -228,7 +280,7 @@ router.get("/prediccion/diaria/semana/:fecha", requireAuth,
     }
 
     const [diasPrediccion, diasReal] = await Promise.all([
-      query(
+      query<PrediccionDiariaRow>(
         `SELECT
            fecha,
            monto_pred,
@@ -244,7 +296,7 @@ router.get("/prediccion/diaria/semana/:fecha", requireAuth,
         [fecha, sucursal_id ?? null]
       ),
 
-      query(
+      query<SemanaRealRow>(
         `SELECT
            usu_fecha::text                       AS fecha,
            SUM(total)::numeric                   AS monto_real,
@@ -263,10 +315,10 @@ router.get("/prediccion/diaria/semana/:fecha", requireAuth,
     ]);
 
     const NOMBRES_DIA = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-    const realPorFecha = new Map((diasReal as any[]).map((d: any) => [String(d.fecha), d]));
+    const realPorFecha = new Map<string, SemanaRealRow>(diasReal.map((d) => [d.fecha, d]));
 
-    const dias = (diasPrediccion as any[]).map((d: any) => {
-      const fechaDia = String(d.fecha);
+    const dias = diasPrediccion.map((d) => {
+      const fechaDia = d.fecha;
       const real = realPorFecha.get(fechaDia);
       return {
         fecha: fechaDia,
