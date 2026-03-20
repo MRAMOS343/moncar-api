@@ -62,6 +62,10 @@ export const VentaSchema = z
     // Campos origen POS
     cliente_origen: NullishTrimmed.optional(),
     datos_origen: NullishTrimmed.optional(),
+    cliente_nombre: NullishTrimmed.optional(),
+    cliente_telefono: NullishTrimmed.optional(),
+    cliente_email: NullishTrimmed.optional(),
+    cliente_empresa: NullishTrimmed.optional(),
     estado_origen: NullishTrimmed.optional(),
     usu_fecha: z.string().optional().nullable(),
     usu_hora: NullishTrimmed.optional(),
@@ -83,6 +87,10 @@ export const VentaSchema = z
     estado: NullishTrimmed.optional(),
     cliente: NullishTrimmed.optional(),
     datos: NullishTrimmed.optional(),
+    nombre_cliente: NullishTrimmed.optional(),
+    telefono_cliente: NullishTrimmed.optional(),
+    email_cliente: NullishTrimmed.optional(),
+    empresa_cliente: NullishTrimmed.optional(),
   })
   .passthrough();
 

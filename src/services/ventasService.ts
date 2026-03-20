@@ -136,6 +136,10 @@ export class VentasService {
     const estadoVal = venta.estado_origen ?? venta.estado ?? null;
     const clienteVal = venta.cliente_origen ?? venta.cliente ?? null;
     const datosVal = venta.datos_origen ?? venta.datos ?? null;
+    const clienteNombreVal = venta.cliente_nombre ?? venta.nombre_cliente ?? null;
+    const clienteTelefonoVal = venta.cliente_telefono ?? venta.telefono_cliente ?? null;
+    const clienteEmailVal = venta.cliente_email ?? venta.email_cliente ?? null;
+    const clienteEmpresaVal = venta.cliente_empresa ?? venta.empresa_cliente ?? null;
     const usuFechaVal = venta.usu_fecha ?? null;
     const usuHoraVal = venta.usu_hora ?? null;
     const noRefVal = venta.no_referencia ?? venta.NO_REFEREN ?? venta.folio ?? venta.folio_numero ?? null;
@@ -146,9 +150,10 @@ export class VentasService {
         `
         INSERT INTO ventas (
           venta_id, fecha_emision, sucursal_id, caja_id, serie_documento,
-          folio_numero, no_referencia, cliente_origen, datos_origen, estado_origen,
+          folio_numero, no_referencia, cliente_origen, datos_origen, cliente_nombre,
+          cliente_telefono, cliente_email, cliente_empresa, estado_origen,
           usu_fecha, usu_hora, subtotal, impuesto, total
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
         ON CONFLICT (venta_id) DO UPDATE SET
           fecha_emision = EXCLUDED.fecha_emision,
           sucursal_id = EXCLUDED.sucursal_id,
@@ -158,6 +163,10 @@ export class VentasService {
           no_referencia = EXCLUDED.no_referencia,
           cliente_origen = EXCLUDED.cliente_origen,
           datos_origen = EXCLUDED.datos_origen,
+          cliente_nombre = EXCLUDED.cliente_nombre,
+          cliente_telefono = EXCLUDED.cliente_telefono,
+          cliente_email = EXCLUDED.cliente_email,
+          cliente_empresa = EXCLUDED.cliente_empresa,
           estado_origen = EXCLUDED.estado_origen,
           usu_fecha = EXCLUDED.usu_fecha,
           usu_hora = EXCLUDED.usu_hora,
@@ -176,6 +185,10 @@ export class VentasService {
           noRefVal,
           clienteVal,
           datosVal,
+          clienteNombreVal,
+          clienteTelefonoVal,
+          clienteEmailVal,
+          clienteEmpresaVal,
           estadoVal,
           usuFechaVal,
           usuHoraVal,
